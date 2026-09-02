@@ -1,221 +1,300 @@
-"""ไพน้อย — งานโครงสร้าง: ถอดปริมาณคอนกรีต+เหล็กคาน (Beam, B1-B6)
+"""PDFtoBOQ -- งานโครงสร้าง: ถอดปริมาณคอนกรีต+เหล็กคาน (Beam Takeoff)
 
-Reads S-02 (แบบแปลนคานคอดิน+พื้น - beam+floor plan, grid of beam segments each
-with a code B1-B6 and a length implied by the dimension chain) via Claude vision,
-then computes concrete volume and rebar (bar-cutting-list from 10m stock,
-including the "ADD." extra bars whose length = L/4 of THAT segment's own length)
-in plain Python - never asks the model to do the arithmetic itself.
+เขียนใหม่ทั้งหมด (2569-09-02) แทนเวอร์ชันเดิมที่ผูกกับโปรเจกต์ newhouse โดยเฉพาะ (สเปคคาน/หน้าตัด/
+รหัส B1-B6 hardcode ในโค้ด อ่านจากแผ่น S-02 ที่ไม่มีในโปรเจกต์อื่น) -- ดู LOG.md ฝั่งเอกสารพิมพ์เขียว
 
-Rules encoded here, confirmed by the project owner 2569-08-30 (03-ai-boq-procedure.md
-หมวด 1, "กฎงานคาน"):
-- all of B1-B6 share the same 0.20 x 0.40 m cross-section (read directly off S-08)
-- "ADD." bars extend L/4 from the support, where L = that beam SEGMENT's own
-  length (not a project-wide constant) - e.g. a 4m beam gets a 1m ADD. bar
-- rebar spec per code (main bars top/bottom, stirrup) is read once from S-08
-  (schedule table, reliable) - NOT re-derived per segment
+วิธีทำงาน (สเปคใช้โค้ดล้วน, เรขาคณิตใช้ AI vision -- เพราะพิสูจน์แล้วว่าตำแหน่ง/ความยาวคานอ่านจาก
+เรขาคณิต vector ไม่ได้ สีระบุชนิดคานเป็นภาพ raster ฝังในหน้า ไม่ใช่ vector fill):
 
-⚠️ Unlike S-01 (a repeating point grid), S-02 is an irregular beam+floor plan -
-segment lengths vary per bay and are not a simple repeating pattern. The model's
-per-segment length read here should be spot-checked against a manual crop of at
-least one bay before trusting the totals (see 12-extraction-quality-log.md).
+1. สเปคคาน (หน้าตารางขยายคาน เช่น S-10): โค้ดล้วน 100% -- หา TYPE cell (B1/B2/.../CB) แต่ละอันเป็นจุด
+   ยึด แล้วมอบ span อื่นในหน้าให้ block ที่ TYPE cell ใกล้ที่สุด (nearest-label clustering แบบเดียวกับ
+   ที่ใช้จับคู่รหัสฐานราก-ตอม่อ) อ่านหน้าตัด+เหล็กบน/ล่าง/ปลอกจากทั้ง 3 ตำแหน่ง (Continuous/Mid/End)
+   แล้วยึดค่า**มากสุด**ของเหล็กบน/ล่าง และ**ระยะห่างปลอกน้อยสุด**เป็นค่าใช้ตลอดความยาว (safe-side --
+   ไม่ตีความกฎยืด/ตัดเหล็กละเอียดตาม location เหมือนที่วิศวกรออกแบบจริงทำ ได้ปริมาณสูงกว่าจริงเล็กน้อย
+   ไม่ใช่ต่ำกว่า)
+2. เรขาคณิตคาน (ตำแหน่ง/ความยาว): ใช้ตำแหน่งเสา (pier) ที่ยืนยันแล้วจาก extract_pier_column_boq.py
+   เป็น "จุดต่อ" ที่เป็นไปได้ของคาน (คานวิ่งระหว่างจุดรองรับสองจุดที่ติดกันบนกริดเดียวกัน) -- คำนวณ
+   ความยาวแต่ละช่วงจากตำแหน่งกริดจริง (ไม่ต้องให้ AI อ่าน/บวกเลขเอง) แล้วถาม AI vision แค่คำถามแคบๆ
+   ต่อช่วง (มีคานทาบช่วงนี้ไหม รหัสอะไร ดูจากสี) แทนการให้ไล่ตามเส้นสีในภาพทั้งหมดเอง (ทดสอบแล้วพบว่า
+   วิธีให้ AI ไล่เส้น+บวกความยาวเองมีอัตราผิดพลาดสูงกว่าการถามแบบมีจุดยึดพิกัดพิกเซลให้ชัดเจน)
+   ใช้โมเดลที่แม่นกว่า (ไม่ใช่ default ที่เบากว่า) สำหรับงานแยกสีนี้โดยเฉพาะเพราะพิสูจน์แล้วว่าจำเป็น
+
+**ข้อจำกัดที่ทราบ:** ครอบคลุมเฉพาะคานที่วิ่งระหว่างจุดเสา (pier) ที่ยืนยันแล้วเท่านั้น -- คานช่วงสั้นที่
+รองรับด้วยจุดอื่นที่ไม่ใช่เสาหลัก (เช่น คานทางเข้า/กันสาดที่รองรับด้วยผนัง) จะไม่ถูกนับ ทำให้ความยาวรวม
+ต่ำกว่าความเป็นจริงได้บ้าง -- ระบุสถานะ "partial_coverage" ไว้เสมอ ไม่อ้างว่าครบ 100%
 
 Usage:
-    python extract_beam_boq.py <pdf_path> --s02-page 15
+    python extract_beam_boq.py <pdf_path>
 """
 import argparse
-import math
-import os
+import json
 import re
 import sys
 
-import anthropic
 import fitz
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from extract_foundation_data import call_single, render_page
+import grid_utils
+from extract_footing_boq import extract_footing_takeoff
+from thai_font_fix import extract_fixed_spans
 
-S02_PROMPT = """This is a Thai residential ground-tie-beam + floor plan (แบบแปลนคานคอดิน, พื้น),
-drawn on a structural grid (columns 1-6 left-right, rows A-E top-bottom, all dimensions in
-meters). Every physical beam MEMBER is a straight line segment between two points on the grid
-(usually between two adjacent grid intersections, but sometimes a shorter segment within one
-bay when a dimension chain subdivides it - e.g. a 4.50m bay might be split into 1.20m + 3.30m
-by two different beams). Each beam segment is labeled with a code (B1, B2, B3, B4, B5, or B6)
-printed next to it.
+BEAM_CODE_RE = re.compile(r"^(B[0-9]+|CB)$")
+REBAR_COUNT_RE = re.compile(r"^(\d+)-DB\s*(\d+)\s*mm\.?$", re.IGNORECASE)
+STIRRUP_RE = re.compile(r"^RB\s*(\d+)\s*mm\.?\s*@=?\s*([\d.]+)\s*mm\.?$", re.IGNORECASE)
+SIZE_MM_RE = re.compile(r"^(\d+)\s*[xX]\s*(\d+)\s*mm\.?$")
 
-For EVERY beam segment, read: (1) its code, (2) its length in meters (read the printed
-dimension number(s) along that exact segment from the dimension chains around the plan's
-perimeter - do not guess or compute from unrelated dimensions), (3) which two grid points it
-connects (e.g. "A1-A2" for a segment along row A between columns 1 and 2, or "1A-1B" for a
-vertical segment along column 1 between rows A and B).
-
-Also separately note every "S1" symbol (a square with a diagonal cross/X hatch pattern,
-usually with a circled "S1" label) and every "CS" circled label you see - report their
-approximate grid-bay location (e.g. "bay between A1-A2/A-B") - these mark cast-in-place slab
-zones, not beams, but the count/location matters for a later floor takeoff. Do NOT count these
-as beams.
-
-If a segment's length is genuinely illegible or you are not confident, say so in "notes"
-instead of guessing a number.
-
-Respond with ONLY JSON: {"beam_segments": [{"code": "B5", "length_m": 4.50,
-"grid": "A1-A2"}, ...], "s1_zones": ["bay A1-A2/top-offset", ...], "cs_zones": ["..."],
-"notes": "..."}"""
-
-
-# --- confirmed constants (03-ai-boq-procedure.md หมวด 1, 2569-08-30, read off S-08) ---
-CROSS_SECTION_M = (0.20, 0.40)  # width x depth, same for all of B1-B6
 STRUCTURAL_CONCRETE_WASTE = 0.03
+REBAR_WEIGHT_WASTE = 0.05
 DB12_KG_PER_M = 0.888
-DB16_KG_PER_M = 1.578  # standard d^2/162 table value
 RB6_KG_PER_M = 0.222
-STOCK_BAR_LENGTH_M = 10.0
 STIRRUP_HOOK_ALLOWANCE_M = 0.10
 
-# read directly off S-08 (schedule table, reliable - not re-derived per segment)
-# main_top / main_bottom: (count, size) at SECTION A-A (support) and SECTION B-B (midspan)
-# add_bar: (count, size) or None - the "ADD." extra bars, length = L/4 of the segment
-# stirrup: (legs, size, spacing_m)
-BEAM_SCHEDULE = {
-    "B1": {"main_top": (2, "DB12"), "main_bottom": (2, "DB12"), "add_bar": None,
-           "stirrup": (1, "RB6", 0.15)},
-    "B2": {"main_top": (2, "DB12"), "main_bottom": (4, "DB12"), "add_bar": None,
-           "stirrup": (1, "RB6", 0.15)},
-    "B3": {"main_top": (2, "DB12"), "main_bottom": (2, "DB12"), "add_bar": (1, "DB12"),
-           "stirrup": (1, "RB6", 0.15)},
-    "B4": {"main_top": (2, "DB12"), "main_bottom": (3, "DB12"), "add_bar": (2, "DB12"),
-           "stirrup": (1, "RB6", 0.15)},
-    "B5": {"main_top": (3, "DB16"), "main_bottom": (3, "DB16"), "add_bar": (2, "DB16"),
-           "stirrup": (1, "RB6", 0.15)},
-    "B6": {"main_top": (6, "DB16"), "main_bottom": (6, "DB16"), "add_bar": None,
-           "stirrup": (2, "RB6", 0.15)},
-}
-KG_PER_M = {"DB12": DB12_KG_PER_M, "DB16": DB16_KG_PER_M, "RB6": RB6_KG_PER_M}
+GEOMETRY_VISION_MODEL = "claude-sonnet-5"
+CROP_MARGIN_PT = 150
 
 
-def stirrup_perimeter_m(cross_section_m):
-    w, h = cross_section_m
-    return 2 * (w + h) + STIRRUP_HOOK_ALLOWANCE_M
-
-
-def compute_beam_boq(beam_segments):
-    """beam_segments: [{"code", "length_m", "grid"}, ...] - one row per PHYSICAL segment
-    (not grouped by code yet - each segment has its own L for the ADD. bar rule)."""
-    rows = []
-    total_concrete = 0.0
-    main_pieces_by_key = {}  # {(size, round(length,3)): piece count}
-    stirrup_pieces_by_key = {}
-
-    w, h = CROSS_SECTION_M
-    cross_area = w * h
-    stirrup_len = round(stirrup_perimeter_m(CROSS_SECTION_M), 3)
-
-    for seg in beam_segments:
-        code = seg["code"]
-        L = seg["length_m"]
-        if code not in BEAM_SCHEDULE:
-            rows.append({"code": code, "length_m": L, "grid": seg.get("grid"), "flag": f"unknown beam code '{code}' - skipped"})
+def parse_beam_schedule(doc):
+    """หาแผ่นตารางขยายคาน (มี TOP BAR + STIRRUP ปรากฏ) แล้วดึงสเปคทุกรหัสด้วย nearest-type-header
+    clustering -- ไม่ hardcode ตำแหน่งหน้า/พิกัด ใช้ได้กับ layout ตารางหลายบล็อกต่อหน้าทั่วไป."""
+    for pno in range(len(doc)):
+        spans = extract_fixed_spans(doc[pno])
+        texts = [s["text"].strip() for s in spans]
+        if "TOP BAR" not in texts or "STIRRUP" not in texts:
             continue
-        sched = BEAM_SCHEDULE[code]
 
-        vol = cross_area * L
-        total_concrete += vol
+        type_cells = [(t, *grid_utils.center(s["bbox"])) for s, t in zip(spans, texts) if BEAM_CODE_RE.match(t)]
+        if not type_cells:
+            continue
 
-        top_n, top_size = sched["main_top"]
-        bot_n, bot_size = sched["main_bottom"]
-        main_pieces_by_key[(top_size, round(L, 3))] = main_pieces_by_key.get((top_size, round(L, 3)), 0) + top_n
-        main_pieces_by_key[(bot_size, round(L, 3))] = main_pieces_by_key.get((bot_size, round(L, 3)), 0) + bot_n
-
-        add_len = None
-        if sched["add_bar"]:
-            add_n, add_size = sched["add_bar"]
-            add_len = round(L / 4, 3)
-            main_pieces_by_key[(add_size, add_len)] = main_pieces_by_key.get((add_size, add_len), 0) + add_n
-
-        legs, stir_size, spacing = sched["stirrup"]
-        n_stirrups = math.ceil(L / spacing) + 1
-        stirrup_pieces_by_key[(stir_size, stirrup_len)] = stirrup_pieces_by_key.get((stir_size, stirrup_len), 0) + n_stirrups * legs
-
-        rows.append({
-            "code": code, "length_m": L, "grid": seg.get("grid"),
-            "concrete_m3": round(vol, 4),
-            "main_top": f"{top_n}-{top_size}", "main_bottom": f"{bot_n}-{bot_size}",
-            "add_bar": f"{sched['add_bar'][0]}-{sched['add_bar'][1]} @ {add_len}m" if sched["add_bar"] else None,
-            "stirrups": n_stirrups * legs,
-        })
-
-    def cutting_list_from(pieces_by_key):
-        cl = []
-        total_bars = 0
-        total_purchased_m = 0.0
-        total_used_m = 0.0
-        for (size, length), n_pieces in sorted(pieces_by_key.items()):
-            pieces_per_bar = math.floor(STOCK_BAR_LENGTH_M / length)
-            if pieces_per_bar < 1:
-                cl.append({"size": size, "piece_length_m": length, "pieces_needed": n_pieces,
-                           "flag": f"length {length}m exceeds one 10m stock bar - needs a splice, not computed"})
+        blocks = {code: {"db": [], "rb": [], "size": []} for code, _, _ in type_cells}
+        for s, t in zip(spans, texts):
+            x, y = grid_utils.center(s["bbox"])
+            candidates = [(code, cx, cy) for code, cx, cy in type_cells if cy <= y + 5]
+            if not candidates:
                 continue
-            bars_needed = math.ceil(n_pieces / pieces_per_bar)
-            purchased_m = bars_needed * STOCK_BAR_LENGTH_M
-            used_m = n_pieces * length
-            cl.append({"size": size, "piece_length_m": length, "pieces_needed": n_pieces,
-                       "pieces_per_stock_bar": pieces_per_bar, "bars_needed": bars_needed,
-                       "used_m": round(used_m, 2), "purchased_m": purchased_m})
-            total_bars += bars_needed
-            total_purchased_m += purchased_m
-            total_used_m += used_m
-        return cl, total_bars, total_purchased_m, total_used_m
+            code = min(candidates, key=lambda c: (x - c[1]) ** 2 + (y - c[2]) ** 2)[0]
 
-    main_cl, main_bars, main_purch, main_used = cutting_list_from(main_pieces_by_key)
-    stir_cl, stir_bars, stir_purch, stir_used = cutting_list_from(stirrup_pieces_by_key)
+            m = REBAR_COUNT_RE.match(t)
+            if m:
+                blocks[code]["db"].append((int(m.group(1)), m.group(2), y))
+                continue
+            m = STIRRUP_RE.match(t)
+            if m:
+                blocks[code]["rb"].append((m.group(1), float(m.group(2)) / 1000))
+                continue
+            m = SIZE_MM_RE.match(t)
+            if m:
+                blocks[code]["size"].append((int(m.group(1)), int(m.group(2))))
+
+        schedule = {}
+        for code, d in blocks.items():
+            if not d["db"]:
+                continue
+            ys = sorted({y for _, _, y in d["db"]})
+            mid = (ys[0] + ys[-1]) / 2 if len(ys) > 1 else ys[0]
+            top = [n for n, _, y in d["db"] if y <= mid]
+            bottom = [n for n, _, y in d["db"] if y > mid]
+            db_size = d["db"][0][1]
+            max_top = max(top) if top else max(n for n, _, _ in d["db"])
+            max_bottom = max(bottom) if bottom else max_top
+            min_spacing = min((sp for _, sp in d["rb"]), default=None)
+            stirrup_size = d["rb"][0][0] if d["rb"] else None
+            size_mm = d["size"][0] if d["size"] else None
+            schedule[code] = {
+                "size_m": [size_mm[0] / 1000, size_mm[1] / 1000] if size_mm else None,
+                "top_bar_count": max_top, "bottom_bar_count": max_bottom, "db_size": db_size,
+                "stirrup_size": stirrup_size, "stirrup_spacing_m": min_spacing,
+            }
+        if schedule:
+            return {"page": pno + 1, "schedule": schedule}
+    return None
+
+
+def build_candidate_segments(doc, pier_positions, drawing_no="S-06"):
+    """สร้างรายการช่วงกริดที่ *อาจ* มีคานทาบ จากตำแหน่งเสาที่ยืนยันแล้ว (จุดต่อเนื่องกันบนแถว/คอลัมน์
+    เดียวกัน) -- คำนวณความยาวจริงจากตำแหน่งกริด ไม่ต้องให้ AI อ่าน/บวกเลข."""
+    pno = grid_utils.find_drawing_page(doc, drawing_no)
+    if pno is None:
+        return None, None, None
+    page = doc[pno]
+    spans = extract_fixed_spans(page)
+    columns, rows = grid_utils.extract_grid(spans)
+    col_x = dict(columns)
+    row_y = dict(rows)
+    scale_denom = grid_utils.find_scale_denominator(spans)
+    pts_per_m = grid_utils.points_per_meter(scale_denom) if scale_denom else None
+    if not pts_per_m:
+        return None, None, None
+
+    by_row, by_col = {}, {}
+    for g in pier_positions:
+        col, row = g[0], g[1:]
+        if col not in col_x or row not in row_y:
+            continue
+        by_row.setdefault(row, []).append(g)
+        by_col.setdefault(col, []).append(g)
+
+    segments = []
+    for row, pts in by_row.items():
+        pts.sort(key=lambda g: col_x[g[0]])
+        for a, b in zip(pts, pts[1:]):
+            segments.append({
+                "from": a, "to": b, "orientation": "horizontal",
+                "length_m": round(abs(col_x[b[0]] - col_x[a[0]]) / pts_per_m, 3),
+                "from_pt": (col_x[a[0]], row_y[row]), "to_pt": (col_x[b[0]], row_y[row]),
+            })
+    for col, pts in by_col.items():
+        pts.sort(key=lambda g: row_y[g[1:]])
+        for a, b in zip(pts, pts[1:]):
+            segments.append({
+                "from": a, "to": b, "orientation": "vertical",
+                "length_m": round(abs(row_y[b[1:]] - row_y[a[1:]]) / pts_per_m, 3),
+                "from_pt": (col_x[col], row_y[a[1:]]), "to_pt": (col_x[col], row_y[b[1:]]),
+            })
+
+    if not segments:
+        return None, None, None
+
+    xs = [p for s in segments for p in (s["from_pt"][0], s["to_pt"][0])]
+    ys = [p for s in segments for p in (s["from_pt"][1], s["to_pt"][1])]
+    clip = fitz.Rect(min(xs) - CROP_MARGIN_PT, min(ys) - CROP_MARGIN_PT,
+                      max(xs) + CROP_MARGIN_PT, max(ys) + CROP_MARGIN_PT)
+    clip = clip.intersect(page.rect)
+    return pno, segments, clip
+
+
+def classify_segments_via_vision(page, segments, clip, valid_codes, dpi=200):
+    import ai_vision_fallback
+    scale = dpi / 72.0
+    to_px = lambda pt: (round((pt[0] - clip.x0) * scale), round((pt[1] - clip.y0) * scale))
+    seg_list = [{"id": i, "from": s["from"], "to": s["to"],
+                 "from_px": to_px(s["from_pt"]), "to_px": to_px(s["to_pt"])}
+                for i, s in enumerate(segments)]
+    codes_str = ", ".join(sorted(valid_codes))
+
+    prompt = f"""ภาพนี้คือแปลนคาน (beam plan) พิกัดพิกเซล (x,y) นับจากมุมบนซ้ายของภาพนี้เป็น (0,0)
+เส้นคานแต่ละเส้นมีสีต่างกันตามรหัส จับกลุ่มสีที่ต่างกันชัดเจนแล้วจับคู่กับรหัสตามป้ายชื่อที่อยู่ใกล้เส้น
+นั้นที่สุด **รหัสคานที่มีจริงในโปรเจกต์นี้มีแค่: {codes_str} เท่านั้น -- ห้ามตอบรหัสอื่นนอกจากรายการนี้
+เด็ดขาด แม้จะเห็นตัวเลขในภาพไม่ชัดก็ให้เลือกรหัสที่ใกล้เคียงที่สุดจากรายการนี้ ไม่ใช่สร้างรหัสใหม่**
+
+นี่คือรายการ "เส้นกริดที่มีเสารองรับสองข้าง" (candidate segment) ที่ต้องการให้ตรวจสอบว่ามีคานทาบเส้นตรง
+ระหว่างจุดสองจุดนั้นหรือไม่ (พิกัดพิกเซลของแต่ละจุด):
+{json.dumps(seg_list, ensure_ascii=False)}
+
+สำหรับแต่ละ id ในรายการ ให้ดูตำแหน่งพิกเซลนั้นในภาพว่ามีเส้นคาน (เส้นหนาระบายสี มีป้ายชื่อกำกับ) ทาบเส้น
+ตรงระหว่างสองจุดนั้นจริงหรือไม่ ถ้ามีให้อ่านรหัสคาน (ต้องเป็นหนึ่งใน {codes_str} เท่านั้น) จากป้ายชื่อที่
+ใกล้ที่สุด ถ้าไม่มีเส้นคานทาบเลย (เช่นเป็นช่องว่างหรือผนังเฉยๆ) ให้ตอบ code เป็น null ตอบสั้นกระชับ
+
+ตอบเป็น JSON ล้วนๆ เท่านั้น ไม่มีข้อความอื่น ต้องมีผลลัพธ์ครบทุก id ({len(segments)} รายการ):
+{{"results": [{{"id": 0, "code": "B4"}}, {{"id": 1, "code": null}}, ...]}}"""
+
+    pix = page.get_pixmap(dpi=dpi, clip=clip)
+    result = ai_vision_fallback.call_vision_json(pix.tobytes("png"), prompt,
+                                                  model=GEOMETRY_VISION_MODEL, max_tokens=4096)
+    return result
+
+
+def extract_beam_takeoff(pdf_path):
+    doc = fitz.open(pdf_path)
+    notes = []
+
+    schedule_result = parse_beam_schedule(doc)
+    if schedule_result is None:
+        return {"status": "spec_not_found", "notes": ["ไม่พบตารางขยายคาน (ต้องมี TOP BAR + STIRRUP)"],
+                "items": []}
+    schedule = schedule_result["schedule"]
+
+    footing = extract_footing_takeoff(pdf_path, use_vision_fallback=False)
+    pier_positions = [p["grid"] for p in footing.get("positions", []) if p.get("pier_code")]
+    if not pier_positions:
+        return {"status": "no_pier_positions", "notes": ["ต้องมีตำแหน่งเสาก่อน (extract_footing_boq)"],
+                "items": []}
+
+    pno, segments, clip = build_candidate_segments(doc, pier_positions)
+    if segments is None:
+        return {"status": "geometry_not_found", "notes": ["หากริด/สเกลสำหรับวางตำแหน่งคานไม่เจอ"],
+                "items": []}
+
+    try:
+        import ai_vision_fallback  # noqa: F401
+        vision_result = classify_segments_via_vision(doc[pno], segments, clip, valid_codes=set(schedule.keys()))
+    except Exception as e:
+        return {"status": "vision_call_failed", "notes": [f"AI vision เรียกไม่สำเร็จ (หน้า {pno + 1}): {e}"],
+                "items": []}
+
+    if vision_result.get("_parse_error"):
+        return {"status": "vision_parse_failed",
+                "notes": [f"AI vision อ่านผลไม่สำเร็จ (หน้า {pno + 1})", str(vision_result.get("_raw"))[:300]],
+                "items": []}
+
+    code_by_id = {r["id"]: r.get("code") for r in vision_result.get("results", [])}
+    valid_codes = set(schedule.keys())
+    invalid_codes_seen = set()
+    totals = {}
+    matched_segments = []
+    for i, seg in enumerate(segments):
+        code = code_by_id.get(i)
+        if code and code not in valid_codes:
+            invalid_codes_seen.add(code)
+            code = None
+        if not code:
+            continue
+        totals.setdefault(code, 0.0)
+        totals[code] += seg["length_m"]
+        matched_segments.append({**seg, "code": code})
+
+    unmatched_count = len(segments) - len(matched_segments)
+    notes.append(f"ครอบคลุมเฉพาะคานระหว่างจุดเสาที่ยืนยันแล้ว ({len(segments)} ช่วง, จับคู่ได้ {len(matched_segments)}) "
+                 f"-- คานช่วงสั้นที่รองรับด้วยจุดอื่น (เช่นทางเข้า/กันสาด) ยังไม่ถูกนับ")
+    if unmatched_count:
+        notes.append(f"{unmatched_count} ช่วงที่ตรวจสอบแล้วไม่พบคานทาบ (อาจเป็นผนังเฉยๆ หรือ AI อ่านพลาด)")
+    if invalid_codes_seen:
+        notes.append(f"AI ตอบรหัสที่ไม่มีในตารางสเปคจริง {sorted(invalid_codes_seen)} -- ตัดทิ้ง (ถือเป็น null)")
+
+    items = []
+    for code, total_length in sorted(totals.items()):
+        spec = schedule.get(code)
+        item = {"code": code, "total_length_m": round(total_length, 2)}
+        if spec and spec["size_m"]:
+            w, h = spec["size_m"]
+            item["size_m"] = [w, h]
+            vol = w * h * total_length
+            item["concrete_m3_net"] = round(vol, 4)
+            item["concrete_m3_with_waste"] = round(vol * (1 + STRUCTURAL_CONCRETE_WASTE), 4)
+            n_bars = spec["top_bar_count"] + spec["bottom_bar_count"]
+            main_kg = total_length * n_bars * DB12_KG_PER_M
+            item["main_bar_spec"] = f"{spec['top_bar_count']}+{spec['bottom_bar_count']}-DB{spec['db_size']}"
+            item["main_bar_kg_net"] = round(main_kg, 2)
+            item["main_bar_kg_with_waste"] = round(main_kg * (1 + REBAR_WEIGHT_WASTE), 2)
+            if spec["stirrup_spacing_m"]:
+                n_ties = int(total_length / spec["stirrup_spacing_m"]) + 1
+                tie_perimeter = 2 * (w + h) + STIRRUP_HOOK_ALLOWANCE_M
+                stirrup_kg = n_ties * tie_perimeter * RB6_KG_PER_M
+                item["stirrup_spec"] = f"1-RB{spec['stirrup_size']}@{spec['stirrup_spacing_m']:.3f}m"
+                item["stirrup_kg_net"] = round(stirrup_kg, 2)
+                item["stirrup_kg_with_waste"] = round(stirrup_kg * (1 + REBAR_WEIGHT_WASTE), 2)
+            item["status"] = "computed"
+        else:
+            item["status"] = "spec_missing"
+            notes.append(f"ไม่มีสเปคหน้าตัด/เหล็กของรหัส {code} ในตารางขยายคาน -- ข้ามการคำนวณ")
+        items.append(item)
 
     return {
-        "rows": rows,
-        "total_concrete_m3": round(total_concrete, 3),
-        "total_concrete_with_waste_m3": round(total_concrete * (1 + STRUCTURAL_CONCRETE_WASTE), 3),
-        "main_bar_cutting_list": {"rows": main_cl, "total_bars": main_bars,
-                                    "total_purchased_m": main_purch, "total_used_m": round(main_used, 2)},
-        "stirrup_cutting_list": {"rows": stir_cl, "total_bars": stir_bars,
-                                   "total_purchased_m": stir_purch, "total_used_m": round(stir_used, 2)},
+        "status": "partial_coverage",
+        "geometry_page": pno + 1,
+        "schedule_page": schedule_result["page"],
+        "items": items,
+        "notes": notes,
+        "candidate_segment_count": len(segments),
+        "matched_segment_count": len(matched_segments),
     }
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("pdf_path")
-    ap.add_argument("--s02-page", type=int, required=True)
     args = ap.parse_args()
-
-    client = anthropic.Anthropic()
-    doc = fitz.open(args.pdf_path)
-
-    print("Reading S-02 (beam+floor plan) - beam segments, S1/CS zones...")
-    s02_data, u1 = call_single(client, render_page(doc, args.s02_page - 1), S02_PROMPT, max_tokens=24000)
-
-    cost = (u1.input_tokens * 2.00 + u1.output_tokens * 10.00) / 1_000_000
-
-    all_segments = s02_data.get("beam_segments", [])
-    segments = [s for s in all_segments if s.get("length_m") is not None]
-    unconfirmed = [s for s in all_segments if s.get("length_m") is None]
-    print(f"\nไพน้อย อ่านได้ {len(all_segments)} segments ({len(segments)} มีความยาวยืนยัน, {len(unconfirmed)} ยังไม่ยืนยัน)")
-    for s in segments:
-        print(f"  {s}")
-    if unconfirmed:
-        print("\n⚠️ segments ที่ยังไม่มีความยาว (ไม่รวมคำนวณ รอตรวจสอบเพิ่ม):")
-        for s in unconfirmed:
-            print(f"  {s}")
-    print(f"\ns1_zones: {s02_data.get('s1_zones')}")
-    print(f"cs_zones: {s02_data.get('cs_zones')}")
-    print(f"notes: {s02_data.get('notes')}")
-
-    result = compute_beam_boq(segments)
-
-    print("\n=== ผลคำนวณ (โค้ด Python ล้วน ไม่ใช่ AI คิดเลข) ===")
-    for row in result["rows"]:
-        print(f"  {row}")
-    print(f"\nคอนกรีตคาน รวม: {result['total_concrete_m3']} m3 (+waste3% = {result['total_concrete_with_waste_m3']} m3)")
-    print(f"\nเหล็กยืน (cutting list): {result['main_bar_cutting_list']}")
-    print(f"เหล็กปลอก (cutting list): {result['stirrup_cutting_list']}")
-    print(f"\ncost: ${cost:.5f} (~{cost*36.5:.2f} THB)")
+    result = extract_beam_takeoff(args.pdf_path)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

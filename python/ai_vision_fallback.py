@@ -41,7 +41,7 @@ def render_page_png(page, dpi=150):
     return page.get_pixmap(dpi=dpi).tobytes("png")
 
 
-def call_vision_json(image_png_bytes, prompt, model=None):
+def call_vision_json(image_png_bytes, prompt, model=None, max_tokens=4096):
     """ส่งภาพ + prompt ไปให้ AI vision อ่าน คืน dict ที่ parse จาก JSON ในคำตอบ -- prompt ต้องสั่งให้ตอบ
     เป็น JSON ล้วนๆ เท่านั้น ไม่มีข้อความอื่นแทรก คืน {"_parse_error": True, "_raw": text} ถ้า parse
     ไม่ได้ (ให้ผู้เรียกจัดการ fallback เอง แทนที่จะโยน exception ทำให้ pipeline ทั้งหมดล้ม)."""
@@ -49,7 +49,7 @@ def call_vision_json(image_png_bytes, prompt, model=None):
     b64 = base64.b64encode(image_png_bytes).decode("ascii")
     resp = client.messages.create(
         model=model or DEFAULT_MODEL,
-        max_tokens=2048,
+        max_tokens=max_tokens,
         messages=[{
             "role": "user",
             "content": [

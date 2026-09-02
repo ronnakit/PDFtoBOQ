@@ -1,8 +1,7 @@
 """PDFtoBOQ -- Pipeline orchestrator: เรียกทุกหมวดที่มี แล้วประกอบเป็นผลลัพธ์เดียว (confirm_boq.json)
 
-Phase B (2569-09-02): ฐานราก + ตอม่อ-เสา, ฐานรากตอนนี้เติมความหนา+เหล็กเสริมด้วย AI vision fallback
-(อ่านตารางสเปคที่ flatten เป็น vector บนแผ่น S-09) แล้ว -- คาน/พื้น/หลังคา ยังไม่เชื่อมเข้ามา (Phase C
-ต่อไป) เพื่อไม่ให้ /api/takeoff ต้องรอทุกหมวดเสร็จพร้อมกัน
+Phase C (2569-09-02): เพิ่มคาน (โค้ดล้วนสำหรับสเปค + AI vision สำหรับเรขาคณิต, ครอบคลุมเฉพาะคานระหว่าง
+จุดเสาที่ยืนยันแล้ว -- status "partial_coverage" เสมอ) -- พื้นยังไม่เชื่อมเข้ามา
 
 คำนวณคอนกรีต/เหล็กด้วยสูตร/ค่าคงที่มาตรฐาน (ค่าฟิสิกส์วัสดุ ใช้ร่วมได้ทุกโปรเจกต์ -- ตรงกับกฎที่
 เอกสารพิมพ์เขียวยึดไว้: ห้ามฝังค่าที่ยืนยันเฉพาะโปรเจกต์เป็นค่าคงที่ในสคริปต์ แต่สูตร/ค่าฟิสิกส์วัสดุ
@@ -21,6 +20,7 @@ from datetime import datetime
 
 import fitz
 
+from extract_beam_boq import extract_beam_takeoff
 from extract_footing_boq import extract_footing_takeoff
 from extract_pier_column_boq import extract_pier_column_takeoff
 from extract_roof_boq import extract_roof_takeoff
@@ -152,6 +152,29 @@ def compute_roof_summary(roof_result):
     }
 
 
+def compute_beam_summary(beam_result):
+    """แปลงผลลัพธ์จาก extract_beam_boq.py (คำนวณคอนกรีต/เหล็กในตัวอยู่แล้วต่อ item) รวมเป็น summary
+    เดียว -- สถานะ "partial" เสมอเพราะครอบคลุมเฉพาะคานระหว่างจุดเสาที่ยืนยันแล้ว (ดู notes ของ
+    extract_beam_takeoff สำหรับรายละเอียดข้อจำกัด)."""
+    if beam_result.get("status") != "partial_coverage" or not beam_result.get("items"):
+        return {"status": beam_result.get("status", "not_implemented")}
+    total_concrete, total_main_kg, total_stirrup_kg = 0.0, 0.0, 0.0
+    for item in beam_result["items"]:
+        total_concrete += item.get("concrete_m3_with_waste") or 0
+        total_main_kg += item.get("main_bar_kg_with_waste") or 0
+        total_stirrup_kg += item.get("stirrup_kg_with_waste") or 0
+    return {
+        "status": "partial",
+        "concrete_m3_net": None,
+        "concrete_m3_with_waste": round(total_concrete, 3),
+        "main_bar_kg_with_waste": round(total_main_kg, 2),
+        "stirrup_kg_with_waste": round(total_stirrup_kg, 2),
+        "note": f"ครอบคลุมเฉพาะคานระหว่างจุดเสาที่ยืนยันแล้ว ({beam_result.get('matched_segment_count')}/"
+                f"{beam_result.get('candidate_segment_count')} ช่วง) -- คานช่วงสั้นนอกจุดเสาหลักยังไม่นับ "
+                f"ตัวเลขจึงต่ำกว่าความเป็นจริงได้",
+    }
+
+
 def run_pipeline(pdf_path, project_dir=None):
     doc = fitz.open(pdf_path)
     page_count = len(doc)
@@ -166,16 +189,29 @@ def run_pipeline(pdf_path, project_dir=None):
     roof = extract_roof_takeoff(pdf_path)
     roof_summary = compute_roof_summary(roof)
 
+    beam = extract_beam_takeoff(pdf_path)
+    beam_summary = compute_beam_summary(beam)
+
     result = {
-        "pdftoboq_version": "phase-b-2569-09-02",
+        "pdftoboq_version": "phase-c-2569-09-02",
         "generated_at": datetime.now().isoformat(),
         "pdf_path": pdf_path,
         "page_count": page_count,
         "categories": {
             "footing": {**footing, "summary": footing_summary},
             "pier_column": {**pier_column, "summary": pier_column_summary},
-            "beam": {"status": "not_implemented", "notes": ["รอ Phase C"]},
-            "floor": {"status": "not_implemented", "notes": ["รอ Phase C"]},
+            "beam": {**beam, "summary": beam_summary},
+            "floor": {
+                "status": "not_implemented",
+                "notes": [
+                    "ลองแล้ว (2569-09-02): จับคู่ป้าย S1/PS บนแผ่นคาน-พื้น (S-06) เข้ากับ 'ช่องกริดโครงสร้าง' "
+                    "ที่ใกล้ที่สุด แล้วคำนวณพื้นที่จากขนาดช่องกริด -- ผลออกมาคลาดเคลื่อนมาก (S1 ได้ 19.25 "
+                    "ตร.ม. เทียบกับพื้นที่จริงที่วัดจากขอบเขตห้องบนแบบสถาปัตย์ 14.34 ตร.ม. คลาดเคลื่อน "
+                    "+34%) เพราะห้องน้ำ/ห้องเล็กไม่ได้มีขอบเขตตรงกับช่องกริดโครงสร้าง (เป็นผนังภายในที่ไม่ "
+                    "ปรากฏในแบบคาน) -- ไม่ปล่อยตัวเลขที่รู้อยู่แล้วว่าคลาดเคลื่อนสูง ต้องอ่านขอบเขตห้องจริง "
+                    "จากแบบสถาปัตย์ (A-05 หรือเทียบเท่า) ด้วย AI vision ก่อน ยังไม่ได้ทำ (รอ Phase C ต่อ)",
+                ],
+            },
             "roof": {**roof, "summary": roof_summary},
         },
     }

@@ -59,9 +59,15 @@ def build_takeoff_summary(pipeline_result):
             any_incomplete = True
 
         items = cat.get("items", [])
-        item_desc = ", ".join(
-            f"{i.get('code')} ({i.get('count')})" for i in items if i.get("code")
-        ) or "-"
+
+        def _describe_item(i):
+            if i.get("count") is not None:
+                return f"{i.get('code')} ({i.get('count')})"
+            if i.get("total_length_m") is not None:
+                return f"{i.get('code')} ({i.get('total_length_m')}ม.)"
+            return str(i.get("code"))
+
+        item_desc = ", ".join(_describe_item(i) for i in items if i.get("code")) or "-"
         rebar_specs = summary.get("note") or "; ".join(cat.get("notes", [])) or "-"
 
         rows.append({
