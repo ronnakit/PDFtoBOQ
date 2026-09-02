@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Plan2BOQ — ถอดแบบโครงสร้าง ฟรี</title>
+    <title>PDFtoBOQ — ถอดแบบโครงสร้าง ฟรี</title>
     
     <!-- Google Fonts: Sarabun -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -59,16 +59,25 @@
     <header class="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md sticky top-0 z-30">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
             <div class="flex items-center gap-2 cursor-pointer" onclick="resetToHome()">
-                <div class="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center text-white font-bold text-xs shadow-md shadow-orange-500/20">
+                <img src="/logo/pdftoboq-icon.png" alt="PDFtoBOQ"
+                     class="w-10 h-10 object-contain"
+                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                <div class="w-10 h-10 rounded-lg bg-orange-500 items-center justify-center text-white font-bold text-sm shadow-md shadow-orange-500/20" style="display:none;">
                     <i class="fa-solid fa-cube"></i>
                 </div>
-                <span class="font-bold text-base tracking-tight text-white">Plan2BOQ</span>
+                <span class="font-normal text-base tracking-tight text-white">PDFtoBOQ</span>
             </div>
 
-            <button onclick="openAdminLogsModal()" class="text-xs text-slate-400 hover:text-orange-400 transition-colors flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-800" title="ประวัติหลังบ้าน (Admin)">
-                <i class="fa-solid fa-clipboard-list text-[11px]"></i>
-                <span>Audit Logs</span>
-            </button>
+            <div class="flex items-center gap-4 text-xs text-slate-400">
+                <a href="mailto:tanswang@gmail.com" class="hover:text-orange-400 transition-colors flex items-center gap-1.5">
+                    <i class="fa-solid fa-envelope text-[11px]"></i>
+                    <span>ติดต่อ</span>
+                </a>
+                <button onclick="openLoginModal()" class="hover:text-orange-400 transition-colors flex items-center gap-1.5">
+                    <i class="fa-solid fa-user text-[11px]"></i>
+                    <span>เข้าระบบ</span>
+                </button>
+            </div>
         </div>
     </header>
 
@@ -79,12 +88,6 @@
         <!-- STATE 1: UPLOAD / DRAG & DROP (หน้าแรก) -->
         <!-- ========================================== -->
         <div id="uploadState" class="space-y-6 text-center">
-
-            <!-- 1. Top Sponsor / Ad Banner Space (พื้นที่แบนเนอร์สินค้าสปอนเซอร์) -->
-            <div class="w-full rounded-xl bg-slate-900/60 border border-slate-800 p-2.5 sm:p-3 text-center flex items-center justify-center gap-2 text-slate-400 text-xs">
-                <span class="text-[10px] uppercase tracking-wider font-semibold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">Sponsor</span>
-                <span>พื้นที่โฆษณาวัสดุก่อสร้าง / คอนกรีต / เหล็กเส้นราคาโรงงาน</span>
-            </div>
 
             <!-- 2. BIG "ฟรี" Headline -->
             <div class="space-y-1">
@@ -142,6 +145,12 @@
                     </div>
 
                 </div>
+            </div>
+
+            <!-- Sponsor / Ad Banner Space (ย้ายมาไว้ใต้ dropzone ตามที่ขอ) -->
+            <div class="w-full max-w-md mx-auto rounded-xl bg-slate-900/60 border border-slate-800 p-2.5 sm:p-3 text-center flex items-center justify-center gap-2 text-slate-400 text-xs">
+                <span class="text-[10px] uppercase tracking-wider font-semibold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">Sponsor</span>
+                <span>พื้นที่โฆษณาวัสดุก่อสร้าง / คอนกรีต / เหล็กเส้นราคาโรงงาน</span>
             </div>
 
         </div>
@@ -303,6 +312,38 @@
 
     </main>
 
+    <!-- Footer: version, contact, copyright -->
+    <footer class="border-t border-slate-800/80 py-5 mt-4">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-[11px] text-slate-500">
+            <div class="flex items-center gap-3">
+                <span>PDFtoBOQ <span class="text-slate-600">v0.1.0</span></span>
+                <span class="text-slate-700">•</span>
+                <span>&copy; 2569 PDFtoBOQ สงวนลิขสิทธิ์ (All rights reserved)</span>
+            </div>
+            <a href="mailto:tanswang@gmail.com?subject=สนใจ%20Sponsor%20/%20ซื้อแอป%20PDFtoBOQ"
+               class="flex items-center gap-1.5 text-slate-400 hover:text-orange-400 transition-colors">
+                <i class="fa-solid fa-envelope text-[10px]"></i>
+                <span>ติดต่อเรา (Sponsor / สนใจซื้อแอป): tanswang@gmail.com</span>
+            </a>
+        </div>
+    </footer>
+
+    <!-- Login Modal (สมาชิกเดิม -- ยังไม่ activate ตอนนี้ แค่โชว์หน้าตา) -->
+    <div id="loginModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="clean-panel max-w-sm w-full rounded-2xl p-6 text-center space-y-4 border border-slate-800 shadow-2xl">
+            <div class="w-14 h-14 rounded-full bg-orange-500/10 text-orange-400 flex items-center justify-center text-2xl mx-auto">
+                <i class="fa-solid fa-user-lock"></i>
+            </div>
+            <div class="space-y-1">
+                <h3 class="font-bold text-sm text-white">เข้าสู่ระบบสำหรับสมาชิกเดิม</h3>
+                <p class="text-xs text-slate-400">ฟีเจอร์นี้กำลังพัฒนาอยู่ เร็วๆ นี้</p>
+            </div>
+            <button onclick="closeLoginModal()" class="w-full py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition-all">
+                ปิด
+            </button>
+        </div>
+    </div>
+
     <!-- Request PDF Modal (Lead Capture) -->
     <div id="requestPdfModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4">
         <div class="clean-panel w-full max-w-sm rounded-2xl border border-slate-800 p-5 space-y-4 shadow-2xl">
@@ -359,38 +400,6 @@
             <div class="flex gap-2 pt-1">
                 <button onclick="closeProModal()" class="flex-1 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs">ปิด</button>
                 <button onclick="alert('ระบบสมัครสมาชิก Pro กำลังจะเปิดให้บริการในเร็วๆ นี้ครับ')" class="flex-1 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-medium">สมัคร Pro</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Admin Audit Logs Modal -->
-    <div id="adminLogsModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4">
-        <div class="clean-panel w-full max-w-2xl rounded-2xl border border-slate-800 p-5 space-y-3 shadow-2xl">
-            <div class="flex items-center justify-between">
-                <h3 class="font-bold text-xs text-white flex items-center gap-1.5">
-                    <i class="fa-solid fa-shield-halved text-orange-400"></i>
-                    <span>ประวัติหลังบ้าน (Admin Audit Logs)</span>
-                </h3>
-                <button onclick="closeAdminLogsModal()" class="text-slate-400 hover:text-white">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
-            </div>
-
-            <div class="max-h-[320px] overflow-y-auto custom-scrollbar border border-slate-800 rounded-xl overflow-hidden">
-                <table class="w-full text-left text-[11px] text-slate-300">
-                    <thead class="bg-slate-950 text-slate-400 border-b border-slate-800">
-                        <tr>
-                            <th class="py-2 px-3">วัน-เวลา</th>
-                            <th class="py-2 px-3">ชื่อไฟล์</th>
-                            <th class="py-2 px-3">เวลา</th>
-                            <th class="py-2 px-3">สถานะ / เหตุผล</th>
-                            <th class="py-2 px-3">อีเมล Lead</th>
-                        </tr>
-                    </thead>
-                    <tbody id="adminLogsTbody" class="divide-y divide-slate-800/60">
-                        <!-- Dynamic Logs -->
-                    </tbody>
-                </table>
             </div>
         </div>
     </div>
@@ -583,43 +592,16 @@
             document.getElementById('proModal').classList.remove('flex');
         }
 
-        async function openAdminLogsModal() {
-            document.getElementById('adminLogsModal').classList.remove('hidden');
-            document.getElementById('adminLogsModal').classList.add('flex');
-
-            const tbody = document.getElementById('adminLogsTbody');
-            tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-slate-500">กำลังดึง Audit Logs...</td></tr>`;
-
-            try {
-                const res = await fetch('/api/admin/logs');
-                const data = await res.json();
-
-                if (data.success && data.logs.length > 0) {
-                    tbody.innerHTML = data.logs.map(log => `
-                        <tr class="hover:bg-slate-900/60">
-                            <td class="py-2 px-3 font-mono text-slate-400">${log.timestamp}</td>
-                            <td class="py-2 px-3 font-semibold text-white truncate max-w-[120px]">${log.file_name}</td>
-                            <td class="py-2 px-3 text-orange-400 font-mono">${log.processing_duration_sec}s</td>
-                            <td class="py-2 px-3">
-                                ${log.status === 'SUCCESS' 
-                                    ? '<span class="text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">สำเร็จ</span>' 
-                                    : '<span class="text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">ไม่สำเร็จ (' + (log.missing_reasons[0] || 'แบบไม่ครบ') + ')</span>'}
-                            </td>
-                            <td class="py-2 px-3 text-slate-300 font-mono">${log.lead_email ? `<span class="text-emerald-400 font-bold">${log.lead_email}</span>` : '<span class="text-slate-600">-</span>'}</td>
-                        </tr>
-                    `).join('');
-                } else {
-                    tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-slate-500">ยังไม่มีประวัติการถอดแบบ</td></tr>`;
-                }
-            } catch (err) {
-                tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-red-400">ไม่สามารถโหลดข้อมูลได้</td></tr>`;
-            }
+        function openLoginModal() {
+            document.getElementById('loginModal').classList.remove('hidden');
+            document.getElementById('loginModal').classList.add('flex');
         }
 
-        function closeAdminLogsModal() {
-            document.getElementById('adminLogsModal').classList.add('hidden');
-            document.getElementById('adminLogsModal').classList.remove('flex');
+        function closeLoginModal() {
+            document.getElementById('loginModal').classList.add('hidden');
+            document.getElementById('loginModal').classList.remove('flex');
         }
+
     </script>
 </body>
 </html>

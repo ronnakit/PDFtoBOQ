@@ -13,6 +13,7 @@ PORT = 8000
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECTS_DIR = os.path.join(BASE_DIR, "project")
 FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
+LOGO_DIR = os.path.join(BASE_DIR, "logo")
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
 LEADS_FILE = os.path.join(LOGS_DIR, "leads.json")
 
@@ -122,7 +123,18 @@ class Plan2BOQHandler(BaseHTTPRequestHandler):
             self.handle_get_admin_leads()
             return
 
-        # 3. เสิร์ฟไฟล์ Static ของ Frontend
+        # 3. เสิร์ฟไฟล์โลโก้จาก D:\webapp\pdftoboq\logo\ (แยกจาก frontend/ ตามที่เจ้าของโปรเจกต์วางไฟล์ไว้)
+        if path.startswith("/logo/"):
+            rel_path = path[len("/logo/"):]
+            file_path = os.path.join(LOGO_DIR, rel_path)
+            if os.path.exists(file_path) and os.path.isfile(file_path):
+                mime, _ = mimetypes.guess_type(file_path)
+                self.serve_static_file(file_path, mime or "application/octet-stream")
+            else:
+                self.send_error(404, "Logo not found")
+            return
+
+        # 4. เสิร์ฟไฟล์ Static ของ Frontend
         if path == "/" or path == "/index.html":
             file_path = os.path.join(FRONTEND_DIR, "index.html")
             self.serve_static_file(file_path, "text/html; charset=utf-8")
