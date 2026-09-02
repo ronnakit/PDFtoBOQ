@@ -214,12 +214,32 @@ def compute_floor_summary(floor_result):
     status = floor_result.get("status")
     if status not in ("computed", "computed_auto"):
         return {"status": status or "not_implemented"}
-    is_auto = status == "computed_auto"
+    source = floor_result.get("source")
+
+    if source == "structural_grid_and_spec":
+        # ทางหลักใหม่: พื้นที่จากป้ายรหัสบนแปลนโครงสร้างจริง + สเปคจริงจากแบบขยายพื้น (ดู
+        # extract_floor_boq.py::auto_extract_floor_boq) -- เชื่อถือได้สูงกว่าทาง fallback เพราะไม่ได้
+        # พึ่งค่ามาตรฐานทั่วไปเลย
+        total_concrete = floor_result.get("total_concrete_m3") or 0.0
+        zones_desc = ", ".join(f"{z['code']} {z['area_m2']}ตร.ม." for z in floor_result.get("zones", []))
+        return {
+            "status": status,
+            "concrete_m3_net": total_concrete,
+            "concrete_m3_with_waste": round(total_concrete * (1 + STRUCTURAL_CONCRETE_WASTE), 3),
+            "rebar_kg_net": floor_result.get("total_rebar_kg"),
+            "note": f"พื้นที่รวม {floor_result.get('total_area_m2')} ตร.ม. ({zones_desc}) -- สเปค+พื้นที่"
+                    f"อ่านจากแบบจริง (แบบขยายพื้นหน้า {floor_result.get('spec_page')}, ป้ายรหัสบนแปลน"
+                    f"โครงสร้างหน้า {floor_result.get('zone_page')}) ยังไม่ผ่านการยืนยันกับเจ้าของโปรเจกต์",
+        }
+
+    # ทาง fallback (MD/floor_data.md ที่คนยืนยันแล้ว, หรือ ai_vision_estimate_fallback เมื่ออ่านสเปค/
+    # ป้ายรหัสจริงไม่สำเร็จ) -- schema เดิมจาก compute_floor_boq()
+    is_auto_fallback = source == "ai_vision_estimate_fallback"
     source_note = (
         f"ถอดอัตโนมัติด้วย AI vision จากแปลนพื้น {floor_result.get('room_plan_sheet_code')} "
-        f"(หน้า {floor_result.get('room_plan_page')}) -- ยังไม่ผ่านการยืนยันกับเจ้าของโปรเจกต์ "
-        f"พื้นที่ต่อห้องเป็นค่าประมาณ ดู notes ของหมวดนี้สำหรับข้อจำกัด"
-        if is_auto else
+        f"(หน้า {floor_result.get('room_plan_page')}) -- หาสเปค/ป้ายรหัสจริงไม่สำเร็จ ใช้ค่ามาตรฐานทั่วไป"
+        f"แทน ยังไม่ผ่านการยืนยันกับเจ้าของโปรเจกต์ พื้นที่ต่อห้องเป็นค่าประมาณ ดู notes สำหรับข้อจำกัด"
+        if is_auto_fallback else
         "ห้อง/พื้นที่มาจาก MD/floor_data.md ที่ยืนยันกับเจ้าของโปรเจกต์แล้ว"
     )
     return {

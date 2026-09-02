@@ -147,6 +147,46 @@ def find_excavation_depth(doc):
     return None
 
 
+EXCAVATION_DEPTH_VISION_PROMPT = """ภาพนี้คือหน้าแบบขยายฐานราก/รายละเอียดประกอบแบบงานฐานราก หาข้อความที่
+ระบุ "ความลึกฐานรากขั้นต่ำ" หรือ "ความลึกที่ดินรับน้ำหนักบรรทุกปลอดภัย" (มักเขียนทำนอง "ความลึกที่ดินรับ
+น้ำหนักบรรทุกปลอดภัยไม่น้อยกว่า N ตัน/ตร.ม. และลึกไม่น้อยกว่า M ม." หรือ "ความลึกของฐานรากเท่ากับ M เมตร"
+-- ข้อความอาจตัดขึ้นบรรทัดใหม่กลางคำ ตำแหน่งบนหน้าไม่แน่นอน อาจอยู่มุมไหนก็ได้ ต้องไล่หาทั่วทั้งภาพ)
+
+ถ้าเจอ ให้อ่านค่าความลึกขั้นต่ำเป็นเมตร (M ในตัวอย่างข้างบน) ถ้าไม่เจอข้อความแบบนี้เลยในภาพ ให้ตอบ
+depth_m เป็น null อย่าเดา/แปลจากข้อมูลอื่น
+
+ตอบเป็น JSON ล้วนๆ เท่านั้น ไม่มีข้อความอื่น: {"depth_m": 0.0, "quote_th": "ข้อความที่เจอเป๊ะๆ"} หรือ
+{"depth_m": null, "quote_th": null}"""
+
+
+def find_excavation_depth_via_vision(doc):
+    """fallback เมื่อ find_excavation_depth() (regex บน text span เดียว) หาไม่เจอ -- ข้อความจริงมักตัด
+    ขึ้นบรรทัดใหม่กลางวลี กระจายหลาย span (เช่น "และลึกไม่น้อยกว่า" อยู่บรรทัดหนึ่ง ตัวเลข "1.50" อยู่อีก
+    บรรทัด) regex เดี่ยวจับไม่ได้ -- ใช้โค้ดหาแผ่น "แบบขยายฐานราก" ก่อน (เร็ว ไม่มีต้นทุน) แล้วให้ AI vision
+    ไล่อ่านทั่วทั้งภาพแทนการเดา/กำหนด default ทันที (ยืนยันจริง: พบเคสที่ข้อความนี้อยู่บนแผ่นเดียวกับตาราง
+    สเปคฐานรากแต่ไม่ตรงรูปแบบ EXCAVATION_DEPTH_RE เลย เกือบพลาดไปกำหนดเป็นค่า default แทนที่จะอ่านจากแบบ
+    จริง -- ดู markdown-app/03-ai-boq-procedure.md หมวด 3)"""
+    from extract_footing_boq import FOOTING_SPEC_TITLE_KEYWORDS
+    pno = grid_utils.find_page_by_content(doc, FOOTING_SPEC_TITLE_KEYWORDS)
+    if pno is None:
+        return None
+    try:
+        import ai_vision_fallback
+    except ImportError:
+        return None
+    page = doc[pno]
+    pix = page.get_pixmap(dpi=250)
+    try:
+        result = ai_vision_fallback.call_vision_json(pix.tobytes("png"), EXCAVATION_DEPTH_VISION_PROMPT,
+                                                       model="claude-sonnet-5", max_tokens=1000)
+    except Exception:
+        return None
+    if result.get("_parse_error") or not result.get("depth_m"):
+        return None
+    return {"page": pno + 1, "depth_m": float(result["depth_m"]), "source": "vision_read",
+            "quote_th": result.get("quote_th")}
+
+
 def extract_pier_column_takeoff(pdf_path, drawing_no=None):
     """drawing_no: ระบุเลขแผ่นเองได้ (override) ปกติไม่ต้องใส่ -- ค้นจากหัวข้อ "แปลนฐานราก" อัตโนมัติ
     ก่อนเสมอ (ตำแหน่งตอม่อ/เสาอยู่บนแผ่นเดียวกับฐานราก) ค่อย fallback ไปนับป้ายรหัสตอม่อถ้าหาไม่เจอ"""
@@ -185,6 +225,14 @@ def extract_pier_column_takeoff(pdf_path, drawing_no=None):
         )
 
     exc_info = find_excavation_depth(doc)
+    if not exc_info:
+        # regex บน text span เดียวหาไม่เจอ -- อาจเพราะข้อความตัดขึ้นบรรทัดใหม่กลางวลี กระจายหลาย span
+        # (ยืนยันจริง) ลองอ่านทั่วทั้งแผ่นสเปคฐานรากด้วย AI vision ก่อนจะยอมกำหนด default (ดู
+        # markdown-app/03-ai-boq-procedure.md หมวด 3 -- "โค้ดหาแผ่นสำคัญ ต้องให้ vision อ่านละเอียดต่อ")
+        exc_info = find_excavation_depth_via_vision(doc)
+        if exc_info:
+            notes.append(f"หาความลึกฐานรากด้วย text regex ไม่เจอ -- AI vision อ่านเจอที่หน้า "
+                         f"{exc_info['page']}: \"{exc_info.get('quote_th')}\"")
     pier_height_m = None
     pier_height_status = "not_computed"
     if exc_info:
