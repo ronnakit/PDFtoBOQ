@@ -72,39 +72,55 @@ def find_page_with_most_markers(doc, marker_re, min_count=3):
 SHEET_CODE_RE = re.compile(r"^[A-Z]{1,3}-\d{1,3}$")
 
 
-def find_sheet_code_by_description(doc, description_keywords, index_min_count=8):
-    """หาแผ่นเป้าหมายผ่าน**สารบัญแบบ (สheet index)** ของเอกสารเอง แทนการเดาเลขแผ่นตรงๆ -- ธรรมเนียมที่
-    เจอจริงข้ามหลายโปรเจกต์ (Thai technical drawing sets) คือเกือบทุกไฟล์มีหน้าสารบัญที่แจกแจง "รหัสแผ่น:
-    คำอธิบาย" ครบทุกแผ่น แต่**รหัสแผ่นที่ตรงกับความหมายเดียวกัน (เช่น "แปลนพื้น") ไม่เหมือนกันข้ามโปรเจกต์
-    เลย** (ยืนยันจริง: โปรเจกต์หนึ่งแปลนพื้น=A-05 อีกโปรเจกต์=A-03) -- จึงต้องอ่านสารบัญของไฟล์นั้นเองก่อน
-    ทุกครั้ง ไม่ hardcode รหัสแผ่นใดๆ
-
-    วิธีหา: หน้าสารบัญมีลักษณะเด่นชัด (นับได้ง่าย ไม่ต้องพึ่งหัวข้อภาษาไทยที่อาจเพี้ยน) คือมีข้อความรูป
-    แบบ "X-NN" (เช่น A-01, S-05) เรียงกันเป็นสิบๆ รายการในหน้าเดียว -- มากกว่าแผ่นแบบอื่นใดๆ ที่ปกติมีแค่
-    รหัสแผ่นตัวเอง 1 รหัส หรืออ้างอิงแผ่นอื่นผ่าน callout ไม่กี่จุด
-
-    description_keywords: list ของคำที่ต้องเจอทุกคำในคำอธิบายของแถวเดียวกัน (AND) -- คืน (sheet_code,
-    description) ของแถวแรกที่ตรง หรือ (None, None) ถ้าไม่เจอหน้าสารบัญ/ไม่เจอแถวที่ตรงเลย"""
+def find_index_page(doc, index_min_count=8):
+    """หาหน้าสารบัญแบบ (sheet index) ของเอกสาร -- นับข้อความรูปแบบ "X-NN" (เช่น A-01, S-05) ที่เรียงกัน
+    เป็นสิบๆ รายการ มากกว่าแผ่นแบบอื่นใดๆ ที่ปกติมีแค่รหัสแผ่นตัวเอง 1 รหัส หรืออ้างอิงแผ่นอื่นผ่าน
+    callout ไม่กี่จุด -- คืน page number (0-indexed) หรือ None ถ้าไม่เจอ (นับได้ไม่ถึง index_min_count)"""
     best_pno, best_count = None, 0
     for pno in range(len(doc)):
         spans = extract_fixed_spans(doc[pno])
         count = sum(1 for s in spans if SHEET_CODE_RE.match(s["text"].strip().upper()))
         if count > best_count:
             best_pno, best_count = pno, count
-    if best_pno is None or best_count < index_min_count:
-        return None, None
+    return best_pno if best_count >= index_min_count else None
 
-    spans = extract_fixed_spans(doc[best_pno])
+
+def list_all_sheets(doc, index_min_count=8):
+    """อ่านสารบัญแบบทั้งหมดของเอกสาร คืน list ของ (sheet_code, description) ทุกแถว เรียงตาม y (บนลงล่าง)
+    -- ใช้เป็นฐานข้อมูลกลางสำหรับ Stage 0 (บันทึกสารบัญทุกหมวดรวมทั้งพื้น/หลังคาลง foundation_data.md)
+    และเป็นฐานให้ find_sheet_code_by_description() ค้นต่อ คืน [] ถ้าหาหน้าสารบัญไม่เจอ
+
+    หน้าสารบัญมักมีคอลัมน์สัญลักษณ์ประกอบแบบ (legend) อยู่ด้วย ซึ่งมีป้ายรหัสแผ่นซ้ำ (เช่น callout
+    "1/A-01" อ้างอิงตัวเอง) ปนอยู่ -- ถ้ารหัสเดียวกันจับคู่คำอธิบายได้หลายแบบ เก็บเฉพาะคำอธิบายที่ยาว
+    ที่สุด (แถวตารางสารบัญจริงมีคำอธิบายเป็นวลีสมบูรณ์ ยาวกว่า noise ที่มักเป็นคำเดี่ยวๆ/ตัวเลข)"""
+    pno = find_index_page(doc, index_min_count)
+    if pno is None:
+        return []
+    spans = extract_fixed_spans(doc[pno])
     codes = [(s["text"].strip().upper(), *center(s["bbox"])) for s in spans if SHEET_CODE_RE.match(s["text"].strip().upper())]
     others = [(s["text"].strip(), *center(s["bbox"])) for s in spans
               if not SHEET_CODE_RE.match(s["text"].strip().upper()) and s["text"].strip()]
+    best = {}  # code -> (description, y) เก็บคำอธิบายที่ยาวสุดต่อรหัส
     for code, cx, cy in codes:
         # คำอธิบายอยู่แถวเดียวกัน (y ใกล้กัน) ทางขวาของรหัสแผ่นเสมอ (รูปแบบตารางสารบัญมาตรฐาน)
         cands = sorted((c for c in others if abs(c[2] - cy) < 6 and c[1] > cx), key=lambda c: c[1])
-        if not cands:
-            continue
-        desc = cands[0][0]
-        if all(k in desc for k in description_keywords):
+        desc = cands[0][0] if cands else None
+        if code not in best or (desc and (best[code][0] is None or len(desc) > len(best[code][0]))):
+            best[code] = (desc, cy)
+    return [(code, desc) for code, (desc, _y) in sorted(best.items(), key=lambda kv: kv[1][1])]
+
+
+def find_sheet_code_by_description(doc, description_keywords, index_min_count=8):
+    """หาแผ่นเป้าหมายผ่าน**สารบัญแบบ (sheet index)** ของเอกสารเอง แทนการเดาเลขแผ่นตรงๆ -- ธรรมเนียมที่
+    เจอจริงข้ามหลายโปรเจกต์ (Thai technical drawing sets) คือเกือบทุกไฟล์มีหน้าสารบัญที่แจกแจง "รหัสแผ่น:
+    คำอธิบาย" ครบทุกแผ่น แต่**รหัสแผ่นที่ตรงกับความหมายเดียวกัน (เช่น "แปลนพื้น") ไม่เหมือนกันข้ามโปรเจกต์
+    เลย** (ยืนยันจริง: โปรเจกต์หนึ่งแปลนพื้น=A-05 อีกโปรเจกต์=A-03) -- จึงต้องอ่านสารบัญของไฟล์นั้นเองก่อน
+    ทุกครั้ง ไม่ hardcode รหัสแผ่นใดๆ
+
+    description_keywords: list ของคำที่ต้องเจอทุกคำในคำอธิบายของแถวเดียวกัน (AND) -- คืน (sheet_code,
+    description) ของแถวแรกที่ตรง หรือ (None, None) ถ้าไม่เจอหน้าสารบัญ/ไม่เจอแถวที่ตรงเลย"""
+    for code, desc in list_all_sheets(doc, index_min_count):
+        if desc and all(k in desc for k in description_keywords):
             return code, desc
     return None, None
 
