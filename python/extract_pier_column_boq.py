@@ -54,6 +54,10 @@ def _to_meters(value):
 SAND_LAYER_M = 0.10       # ค่าฟิสิกส์ทั่วไป (ทรายรองพื้นฐานราก) ใช้ร่วมได้ทุกโปรเจกต์
 LEAN_CONCRETE_M = 0.05    # ค่าฟิสิกส์ทั่วไป (คอนกรีตหยาบ)
 DEFAULT_FLOOR_LEVEL_M = 1.00  # ค่าเผื่อทั่วไปถ้าหาระดับพื้นจริงจากแบบไม่เจอ (ประมาณ ไม่ใช่ยืนยัน)
+DEFAULT_PIER_HEIGHT_M = 1.00  # ค่าเผื่อทั่วไปถ้าหาข้อความ "ความลึกของฐานรากเท่ากับ...เมตร" ไม่เจอเลย
+DEFAULT_COLUMN_HEIGHT_M = 3.00  # ค่าเผื่อทั่วไปถ้า heuristic หาความสูงเสาจากรูปด้านไม่เจอเลย
+                                 # (ทั้งคู่: ไม่หยุดรอข้อมูล -- ประมาณอัตโนมัติแล้วแจ้งในรายงานเสมอ
+                                 # ตามหลักการ "estimate, don't ask" -- ต้องตรวจกับแบบ/หน้างานจริงก่อนใช้จริง)
 
 
 def find_column_schedule(doc):
@@ -171,8 +175,14 @@ def extract_pier_column_takeoff(pdf_path, drawing_no=None):
                       "เป็น vector รอ Phase B (AI vision)")
 
     height_info = find_column_height(doc)
+    column_height_m = height_info["column_height_m"] if height_info else DEFAULT_COLUMN_HEIGHT_M
+    column_height_status = "estimated_from_drawing" if height_info else "estimated_no_data"
     if not height_info:
-        notes.append("หาความสูงเสาจากรูปด้านไม่เจอ (heuristic ไม่ match) -- ต้องตรวจด้วยสายตา/AI vision")
+        notes.append(
+            f"หาความสูงเสาจากรูปด้านไม่เจอ (heuristic ไม่ match) -- กำหนดอัตโนมัติที่ "
+            f"{DEFAULT_COLUMN_HEIGHT_M}ม. (ค่ามาตรฐานทั่วไปสำหรับบ้านพักอาศัยชั้นเดียว) แทนการหยุดรอ "
+            f"ข้อมูล -- ต้องตรวจสอบกับแบบจริงก่อนใช้งานจริง"
+        )
 
     exc_info = find_excavation_depth(doc)
     pier_height_m = None
@@ -188,7 +198,13 @@ def extract_pier_column_takeoff(pdf_path, drawing_no=None):
             f"เพราะยังไม่มีจากตารางสเปค (รอ Phase B)"
         )
     else:
-        notes.append("ไม่พบข้อความ \"ความลึกของฐานรากเท่ากับ...เมตร\" -- คำนวณความสูงตอม่อไม่ได้")
+        pier_height_m = DEFAULT_PIER_HEIGHT_M
+        pier_height_status = "estimated_no_data"
+        notes.append(
+            f"ไม่พบข้อความ \"ความลึกของฐานรากเท่ากับ...เมตร\" ในแบบ -- กำหนดความสูงตอม่ออัตโนมัติที่ "
+            f"{DEFAULT_PIER_HEIGHT_M}ม. (ค่ามาตรฐานทั่วไปสำหรับบ้านพักอาศัยชั้นเดียว) แทนการหยุดรอข้อมูล "
+            f"-- ต้องตรวจสอบกับหน้างานจริงก่อนใช้งานจริง"
+        )
 
     items = []
     for code, count in sorted(counts.items()):
@@ -200,8 +216,8 @@ def extract_pier_column_takeoff(pdf_path, drawing_no=None):
             "stirrup": schedule["stirrup"] if schedule else None,
             "pier_height_m": pier_height_m,
             "pier_height_status": pier_height_status,
-            "column_height_m": height_info["column_height_m"] if height_info else None,
-            "column_height_status": "estimated_from_drawing" if height_info else "not_found",
+            "column_height_m": column_height_m,
+            "column_height_status": column_height_status,
         })
 
     return {
