@@ -1,0 +1,2 @@
+ezdxf>=1.4
+xlrd==1.2.0  # legacy .xls reader -- modern xlrd (2.x) dropped .xls support, needed for read_ground_truth_boq.py

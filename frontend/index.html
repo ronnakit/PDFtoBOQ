@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="th" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Plan2BOQ — ถอดแบบโครงสร้าง ฟรี</title>
+    
+    <!-- Google Fonts: Sarabun -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Font Awesome Icons CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Sarabun', 'sans-serif'],
+                    },
+                    colors: {
+                        brand: {
+                            orange: '#f97316',
+                            dark: '#080c14',
+                            surface: '#0f172a',
+                            border: '#1e293b'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Sarabun', sans-serif;
+            background-color: #080c14;
+            color: #f8fafc;
+        }
+        .clean-panel {
+            background-color: #0f172a;
+            border: 1px solid #1e293b;
+        }
+        .drag-active {
+            border-color: #f97316 !important;
+            background-color: rgba(249, 115, 22, 0.08) !important;
+            transform: scale(1.01);
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-orange-500 selection:text-white">
+
+    <!-- Minimal Header -->
+    <header class="border-b border-slate-800/80 bg-slate-950/80 backdrop-blur-md sticky top-0 z-30">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+            <div class="flex items-center gap-2 cursor-pointer" onclick="resetToHome()">
+                <div class="w-7 h-7 rounded-lg bg-orange-500 flex items-center justify-center text-white font-bold text-xs shadow-md shadow-orange-500/20">
+                    <i class="fa-solid fa-cube"></i>
+                </div>
+                <span class="font-bold text-base tracking-tight text-white">Plan2BOQ</span>
+            </div>
+
+            <button onclick="openAdminLogsModal()" class="text-xs text-slate-400 hover:text-orange-400 transition-colors flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-800" title="ประวัติหลังบ้าน (Admin)">
+                <i class="fa-solid fa-clipboard-list text-[11px]"></i>
+                <span>Audit Logs</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 max-w-3xl w-full mx-auto px-4 sm:px-6 py-6 flex flex-col justify-center">
+
+        <!-- ========================================== -->
+        <!-- STATE 1: UPLOAD / DRAG & DROP (หน้าแรก) -->
+        <!-- ========================================== -->
+        <div id="uploadState" class="space-y-6 text-center">
+
+            <!-- 1. Top Sponsor / Ad Banner Space (พื้นที่แบนเนอร์สินค้าสปอนเซอร์) -->
+            <div class="w-full rounded-xl bg-slate-900/60 border border-slate-800 p-2.5 sm:p-3 text-center flex items-center justify-center gap-2 text-slate-400 text-xs">
+                <span class="text-[10px] uppercase tracking-wider font-semibold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20">Sponsor</span>
+                <span>พื้นที่โฆษณาวัสดุก่อสร้าง / คอนกรีต / เหล็กเส้นราคาโรงงาน</span>
+            </div>
+
+            <!-- 2. BIG "ฟรี" Headline -->
+            <div class="space-y-1">
+                <h1 class="text-4xl sm:text-5xl font-extrabold text-white tracking-tight">
+                    ถอดแบบโครงสร้าง <span class="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-amber-400">ฟรี</span>
+                </h1>
+                <p class="text-xs text-slate-400">บ้าน 1-2 ชั้น (ไม่เกิน 200 ตร.ม.)</p>
+            </div>
+
+            <!-- 3. Clean Big Dropzone Area -->
+            <div>
+                <div id="dropZone"
+                     ondragover="handleDragOver(event)"
+                     ondragleave="handleDragLeave(event)"
+                     ondrop="handleDrop(event)"
+                     onclick="document.getElementById('fileInput').click()"
+                     class="clean-panel rounded-2xl p-8 sm:p-12 border-2 border-dashed border-slate-700 hover:border-orange-500 transition-all cursor-pointer text-center group flex flex-col items-center justify-center shadow-2xl">
+                    
+                    <input type="file" id="fileInput" accept=".pdf" class="hidden" onchange="handleFileSelect(event)">
+                    
+                    <!-- Idle State -->
+                    <div id="idleState" class="space-y-3">
+                        <div class="w-16 h-16 rounded-2xl bg-orange-500/10 text-orange-400 flex items-center justify-center text-3xl mx-auto group-hover:scale-110 transition-transform">
+                            <i class="fa-solid fa-cloud-arrow-up"></i>
+                        </div>
+                        <div>
+                            <p class="text-base font-semibold text-white mb-1">
+                                วางไฟล์แบบแปลน PDF ที่นี่
+                            </p>
+                            <p class="text-xs text-slate-400">
+                                หรือ <span class="text-orange-400 underline underline-offset-2">คลิกเพื่อเลือกไฟล์</span>
+                            </p>
+                        </div>
+                    </div>
+
+                    <!-- Selected File State -->
+                    <div id="fileSelectedState" class="hidden flex-col items-center gap-4 w-full max-w-md" onclick="event.stopPropagation()">
+                        <div class="w-full bg-slate-950 px-4 py-3 rounded-xl border border-slate-800 flex items-center justify-between text-left">
+                            <div class="flex items-center gap-3 overflow-hidden">
+                                <i class="fa-solid fa-file-pdf text-red-500 text-2xl"></i>
+                                <div>
+                                    <div id="selectedFileName" class="text-xs font-semibold text-white truncate max-w-[220px]">แบบบ้าน.pdf</div>
+                                    <div id="selectedFileSize" class="text-[10px] text-slate-400">0 MB</div>
+                                </div>
+                            </div>
+                            <button onclick="clearSelectedFile(event)" class="text-slate-400 hover:text-red-400 text-xs p-1.5 rounded-lg hover:bg-slate-900 transition-colors">
+                                <i class="fa-solid fa-trash"></i>
+                            </button>
+                        </div>
+
+                        <button onclick="startTakeoffProcess()" class="w-full py-3.5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-sm shadow-lg shadow-orange-500/25 transition-all flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-calculator"></i>
+                            <span>เริ่มถอดแบบโครงสร้าง ฟรี</span>
+                        </button>
+                    </div>
+
+                </div>
+            </div>
+
+        </div>
+
+        <!-- ========================================== -->
+        <!-- STATE 2: PROCESSING OVERLAY -->
+        <!-- ========================================== -->
+        <div id="processingOverlay" class="fixed inset-0 z-50 bg-black/85 backdrop-blur-md hidden items-center justify-center p-4">
+            <div class="clean-panel max-w-sm w-full rounded-2xl p-8 text-center space-y-4 border border-slate-800 shadow-2xl">
+                <div class="w-14 h-14 rounded-full bg-orange-500/10 text-orange-400 flex items-center justify-center text-2xl mx-auto">
+                    <i class="fa-solid fa-spinner fa-spin"></i>
+                </div>
+                <div class="space-y-1">
+                    <h3 class="font-bold text-sm text-white">กำลังวิเคราะห์แบบแปลนโครงสร้าง...</h3>
+                    <p class="text-xs text-slate-400">กรุณารอสักครู่</p>
+                </div>
+                <div class="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden border border-slate-800">
+                    <div class="bg-gradient-to-r from-orange-500 to-amber-500 h-full w-2/3 animate-pulse"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- STATE 3: RESULT VIEW (ถอดแบบสำเร็จ) -->
+        <!-- ========================================== -->
+        <div id="resultState" class="space-y-6 hidden">
+            <!-- Result Topbar -->
+            <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+                <div>
+                    <span class="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                        <i class="fa-solid fa-circle-check mr-1"></i> ถอดแบบสำเร็จสมบูรณ์
+                    </span>
+                    <h2 id="resFileName" class="text-base font-bold text-white mt-1">สรุปปริมาณงานโครงสร้าง</h2>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span id="resDuration" class="text-xs text-slate-400 font-mono bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">
+                        ⏱️ 0.0s
+                    </span>
+                    <button onclick="resetToHome()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors">
+                        <i class="fa-solid fa-rotate-left mr-1"></i> ถอดแบบใหม่
+                    </button>
+                </div>
+            </div>
+
+            <!-- Top Summary KPI Cards (ตัวเลขรวมภาพรวม) -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div class="clean-panel rounded-xl p-4 border border-slate-800 text-center">
+                    <div class="text-[11px] text-slate-400 font-medium mb-1">คอนกรีตโครงสร้างรวม</div>
+                    <div class="text-2xl font-extrabold text-white">
+                        <span id="kpiConcrete">0.00</span>
+                        <span class="text-xs text-orange-400 font-normal">ลบ.ม.</span>
+                    </div>
+                </div>
+                <div class="clean-panel rounded-xl p-4 border border-slate-800 text-center">
+                    <div class="text-[11px] text-slate-400 font-medium mb-1">เหล็กเสริมโครงสร้างรวม</div>
+                    <div class="text-2xl font-extrabold text-white">
+                        <span id="kpiSteelTon">0.00</span>
+                        <span class="text-xs text-orange-400 font-normal">ตัน (<span id="kpiSteelKg">0</span> กก.)</span>
+                    </div>
+                </div>
+                <div class="clean-panel rounded-xl p-4 border border-slate-800 text-center">
+                    <div class="text-[11px] text-slate-400 font-medium mb-1">พื้นที่ไม้แบบรวม</div>
+                    <div class="text-2xl font-extrabold text-white">
+                        <span id="kpiFormwork">0</span>
+                        <span class="text-xs text-orange-400 font-normal">ตร.ม.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Itemized Category Breakdown Table -->
+            <div class="clean-panel rounded-xl p-4 border border-slate-800 space-y-3">
+                <h3 class="text-xs font-bold text-white">ตารางแจกแจงแยกตามหมวดหมู่โครงสร้าง</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left text-xs text-slate-300">
+                        <thead class="bg-slate-950 text-slate-400 border-b border-slate-800">
+                            <tr>
+                                <th class="py-2.5 px-3">หมวดงาน</th>
+                                <th class="py-2.5 px-3">รายการรหัส</th>
+                                <th class="py-2.5 px-3">คอนกรีต (ลบ.ม.)</th>
+                                <th class="py-2.5 px-3">เหล็กเสริม (กก.)</th>
+                                <th class="py-2.5 px-3">ขนาดเหล็กที่ใช้</th>
+                            </tr>
+                        </thead>
+                        <tbody id="categoryTableBody" class="divide-y divide-slate-800/60">
+                            <!-- Dynamic Rows -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Conversion CTA Actions -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                <!-- 1. Free Itemized PDF Report (Lead Capture) -->
+                <div class="clean-panel rounded-xl p-4 border border-orange-500/30 bg-gradient-to-br from-slate-900 to-orange-950/20 space-y-2 flex flex-col justify-between">
+                    <div>
+                        <div class="inline-flex items-center gap-1 text-[10px] font-bold text-orange-400 bg-orange-500/10 px-2 py-0.5 rounded border border-orange-500/20 mb-1">
+                            <i class="fa-solid fa-gift"></i> ฟรี
+                        </div>
+                        <h4 class="text-xs font-bold text-white">ขอรับเล่มรายงาน PDF ฉบับเต็ม</h4>
+                        <p class="text-[11px] text-slate-400">
+                            ตารางแจกแจงทุกรหัส F1-F3, C1-C2, B1-B6, S1-S2, หลังคา
+                        </p>
+                    </div>
+                    <button onclick="openRequestPdfModal()" class="w-full py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-semibold text-xs shadow-md shadow-orange-500/20 transition-all flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-envelope"></i>
+                        <span>กรอกอีเมลรับรายงาน PDF ฟรี</span>
+                    </button>
+                </div>
+
+                <!-- 2. Pro Excel (.xlsx) Gate -->
+                <div class="clean-panel rounded-xl p-4 border border-slate-800 space-y-2 flex flex-col justify-between">
+                    <div>
+                        <div class="inline-flex items-center gap-1 text-[10px] font-bold text-slate-400 bg-slate-800 px-2 py-0.5 rounded border border-slate-700 mb-1">
+                            <i class="fa-solid fa-crown text-amber-400"></i> สมาชิก Pro
+                        </div>
+                        <h4 class="text-xs font-bold text-white">ดาวน์โหลดไฟล์ Excel (.xlsx)</h4>
+                        <p class="text-[11px] text-slate-400">
+                            ไฟล์ Excel มีสูตรคำนวณอัตโนมัติ พร้อม Cutting list สั่งตัดเหล็ก
+                        </p>
+                    </div>
+                    <button onclick="openProModal()" class="w-full py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs border border-slate-700 transition-all flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-lock text-amber-400"></i>
+                        <span>ปลดล็อกไฟล์ Excel (.xlsx)</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- STATE 4: INCOMPLETE DRAWING ERROR STATE -->
+        <!-- ========================================== -->
+        <div id="incompleteState" class="space-y-4 hidden">
+            <div class="clean-panel rounded-2xl p-6 sm:p-8 border border-amber-500/30 bg-amber-950/10 text-center space-y-3 max-w-md mx-auto">
+                <div class="w-12 h-12 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-xl mx-auto">
+                    <i class="fa-solid fa-triangle-exclamation"></i>
+                </div>
+                <div class="space-y-1">
+                    <h3 class="text-sm font-bold text-white">แบบแปลนไม่สมบูรณ์ ไม่สามารถรับรองความแม่นยำได้</h3>
+                    <p class="text-xs text-slate-400">
+                        ระบบยึดถือมาตรฐานวิศวกรรม จึงไม่ปล่อยตัวเลขที่ไม่สมบูรณ์ ตรวจพบรายการที่ขาดดังนี้:
+                    </p>
+                </div>
+
+                <div class="bg-slate-950 p-3.5 rounded-xl border border-slate-900 text-left">
+                    <ul id="missingItemsList" class="text-xs text-amber-300 space-y-1 list-disc list-inside"></ul>
+                </div>
+
+                <button onclick="resetToHome()" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-colors">
+                    <i class="fa-solid fa-arrow-left mr-1"></i> อัปโหลดไฟล์แบบใหม่
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Request PDF Modal (Lead Capture) -->
+    <div id="requestPdfModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="clean-panel w-full max-w-sm rounded-2xl border border-slate-800 p-5 space-y-4 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <h3 class="font-bold text-xs text-white flex items-center gap-1.5">
+                    <i class="fa-solid fa-file-pdf text-red-500"></i>
+                    <span>รับเล่มรายงาน PDF ฉบับเต็ม (ฟรี)</span>
+                </h3>
+                <button onclick="closeRequestPdfModal()" class="text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-xmark text-sm"></i>
+                </button>
+            </div>
+
+            <p class="text-[11px] text-slate-400">
+                ระบุอีเมลของคุณเพื่อรับเล่มรายงานสรุปแยกย่อยทุกรหัสโครงสร้าง
+            </p>
+
+            <form id="leadForm" onsubmit="handleLeadSubmit(event)" class="space-y-2.5">
+                <div>
+                    <label class="block text-[11px] text-slate-300 mb-1">อีเมลของคุณ <span class="text-orange-400">*</span></label>
+                    <input type="email" id="leadEmail" required placeholder="name@example.com" class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white text-xs placeholder-slate-600 focus:outline-none focus:border-orange-500">
+                </div>
+                <div>
+                    <label class="block text-[11px] text-slate-300 mb-1">เบอร์โทรศัพท์ <span class="text-slate-500">(ถ้ามี)</span></label>
+                    <input type="tel" id="leadPhone" placeholder="08X-XXX-XXXX" class="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-800 text-white text-xs placeholder-slate-600 focus:outline-none focus:border-orange-500">
+                </div>
+                <div class="pt-1 flex gap-2">
+                    <button type="button" onclick="closeRequestPdfModal()" class="flex-1 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs font-medium">ยกเลิก</button>
+                    <button type="submit" id="btnLeadSubmit" class="flex-1 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-xs font-medium shadow-md shadow-orange-500/20">ส่งรายงาน</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Pro Modal -->
+    <div id="proModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="clean-panel w-full max-w-sm rounded-2xl border border-amber-500/30 p-5 space-y-3 shadow-2xl text-center">
+            <div class="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-lg mx-auto">
+                <i class="fa-solid fa-crown"></i>
+            </div>
+            <div class="space-y-1">
+                <h3 class="font-bold text-sm text-white">ปลดล็อกไฟล์ Excel (.xlsx)</h3>
+                <p class="text-[11px] text-slate-400">สำหรับผู้รับเหมา/สถาปนิกที่ต้องการนำไฟล์ไปแก้ไขสูตรและใส่ราคาต่อ</p>
+            </div>
+            
+            <div class="bg-slate-950 p-3 rounded-xl border border-slate-900 text-left text-[11px] space-y-1.5 text-slate-300">
+                <div class="font-semibold text-amber-400">สิทธิพิเศษ Pro:</div>
+                <ul class="space-y-1 list-disc list-inside text-slate-400 text-[10px]">
+                    <li>ดาวน์โหลด Excel มีสูตรคำนวณครบทุกหมวด</li>
+                    <li>ตาราง Cutting List สั่งตัดเหล็กจริง</li>
+                </ul>
+            </div>
+
+            <div class="flex gap-2 pt-1">
+                <button onclick="closeProModal()" class="flex-1 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs">ปิด</button>
+                <button onclick="alert('ระบบสมัครสมาชิก Pro กำลังจะเปิดให้บริการในเร็วๆ นี้ครับ')" class="flex-1 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-medium">สมัคร Pro</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Admin Audit Logs Modal -->
+    <div id="adminLogsModal" class="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm hidden items-center justify-center p-4">
+        <div class="clean-panel w-full max-w-2xl rounded-2xl border border-slate-800 p-5 space-y-3 shadow-2xl">
+            <div class="flex items-center justify-between">
+                <h3 class="font-bold text-xs text-white flex items-center gap-1.5">
+                    <i class="fa-solid fa-shield-halved text-orange-400"></i>
+                    <span>ประวัติหลังบ้าน (Admin Audit Logs)</span>
+                </h3>
+                <button onclick="closeAdminLogsModal()" class="text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="max-h-[320px] overflow-y-auto custom-scrollbar border border-slate-800 rounded-xl overflow-hidden">
+                <table class="w-full text-left text-[11px] text-slate-300">
+                    <thead class="bg-slate-950 text-slate-400 border-b border-slate-800">
+                        <tr>
+                            <th class="py-2 px-3">วัน-เวลา</th>
+                            <th class="py-2 px-3">ชื่อไฟล์</th>
+                            <th class="py-2 px-3">เวลา</th>
+                            <th class="py-2 px-3">สถานะ / เหตุผล</th>
+                            <th class="py-2 px-3">อีเมล Lead</th>
+                        </tr>
+                    </thead>
+                    <tbody id="adminLogsTbody" class="divide-y divide-slate-800/60">
+                        <!-- Dynamic Logs -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentSessionId = '';
+        let selectedFile = null;
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            document.getElementById('dropZone').classList.add('drag-active');
+        }
+
+        function handleDragLeave(e) {
+            e.preventDefault();
+            document.getElementById('dropZone').classList.remove('drag-active');
+        }
+
+        function handleDrop(e) {
+            e.preventDefault();
+            document.getElementById('dropZone').classList.remove('drag-active');
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                setChosenFile(e.dataTransfer.files[0]);
+            }
+        }
+
+        function handleFileSelect(e) {
+            if (e.target.files && e.target.files.length > 0) {
+                setChosenFile(e.target.files[0]);
+            }
+        }
+
+        function setChosenFile(file) {
+            selectedFile = file;
+            document.getElementById('idleState').classList.add('hidden');
+            document.getElementById('fileSelectedState').classList.remove('hidden');
+            document.getElementById('fileSelectedState').classList.add('flex');
+            document.getElementById('selectedFileName').textContent = file.name;
+            document.getElementById('selectedFileSize').textContent = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        function clearSelectedFile(e) {
+            e.stopPropagation();
+            selectedFile = null;
+            document.getElementById('fileInput').value = '';
+            document.getElementById('fileSelectedState').classList.add('hidden');
+            document.getElementById('fileSelectedState').classList.remove('flex');
+            document.getElementById('idleState').classList.remove('hidden');
+        }
+
+        async function startTakeoffProcess() {
+            if (!selectedFile) return;
+
+            document.getElementById('processingOverlay').classList.remove('hidden');
+            document.getElementById('processingOverlay').classList.add('flex');
+
+            try {
+                const formData = new FormData();
+                formData.append('file', selectedFile);
+
+                const res = await fetch('/api/takeoff', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await res.json();
+
+                document.getElementById('processingOverlay').classList.add('hidden');
+                document.getElementById('processingOverlay').classList.remove('flex');
+
+                if (data.success) {
+                    currentSessionId = data.session_id;
+                    renderSuccessResult(data);
+                } else if (data.is_incomplete) {
+                    currentSessionId = data.session_id;
+                    renderIncompleteError(data);
+                } else {
+                    alert(data.message || 'เกิดข้อผิดพลาดในการประมวลผล');
+                }
+            } catch (err) {
+                console.error(err);
+                document.getElementById('processingOverlay').classList.add('hidden');
+                document.getElementById('processingOverlay').classList.remove('flex');
+                alert('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้');
+            }
+        }
+
+        function renderSuccessResult(data) {
+            document.getElementById('uploadState').classList.add('hidden');
+            document.getElementById('incompleteState').classList.add('hidden');
+            document.getElementById('resultState').classList.remove('hidden');
+
+            document.getElementById('resFileName').textContent = 'ผลการถอดแบบ: ' + data.file_name;
+            document.getElementById('resDuration').textContent = '⏱️ ' + data.duration + 's';
+
+            const summary = data.summary;
+            document.getElementById('kpiConcrete').textContent = summary.total_concrete_m3.toFixed(2);
+            document.getElementById('kpiSteelKg').textContent = summary.total_steel_kg.toLocaleString();
+            document.getElementById('kpiSteelTon').textContent = summary.total_steel_ton.toFixed(2);
+            document.getElementById('kpiFormwork').textContent = summary.total_formwork_m2.toFixed(1);
+
+            const tbody = document.getElementById('categoryTableBody');
+            tbody.innerHTML = summary.categories.map(c => `
+                <tr class="hover:bg-slate-900/40">
+                    <td class="py-2.5 px-3 font-semibold text-white">${c.category}</td>
+                    <td class="py-2.5 px-3 text-slate-300 font-mono text-[11px]">${c.items}</td>
+                    <td class="py-2.5 px-3 text-orange-400 font-semibold">${c.concrete_m3 > 0 ? c.concrete_m3.toFixed(2) : '-'}</td>
+                    <td class="py-2.5 px-3 text-slate-200 font-semibold">${c.steel_kg.toLocaleString()}</td>
+                    <td class="py-2.5 px-3 text-slate-400 text-[11px]">${c.rebar_specs}</td>
+                </tr>
+            `).join('');
+        }
+
+        function renderIncompleteError(data) {
+            document.getElementById('uploadState').classList.add('hidden');
+            document.getElementById('resultState').classList.add('hidden');
+            document.getElementById('incompleteState').classList.remove('hidden');
+
+            const listEl = document.getElementById('missingItemsList');
+            listEl.innerHTML = data.missing_items.map(item => `<li>${item}</li>`).join('');
+        }
+
+        function resetToHome() {
+            document.getElementById('resultState').classList.add('hidden');
+            document.getElementById('incompleteState').classList.add('hidden');
+            document.getElementById('uploadState').classList.remove('hidden');
+            clearSelectedFile(new Event('clear'));
+        }
+
+        function openRequestPdfModal() {
+            document.getElementById('requestPdfModal').classList.remove('hidden');
+            document.getElementById('requestPdfModal').classList.add('flex');
+            document.getElementById('leadEmail').focus();
+        }
+
+        function closeRequestPdfModal() {
+            document.getElementById('requestPdfModal').classList.add('hidden');
+            document.getElementById('requestPdfModal').classList.remove('flex');
+        }
+
+        async function handleLeadSubmit(e) {
+            e.preventDefault();
+            const email = document.getElementById('leadEmail').value.trim();
+            const phone = document.getElementById('leadPhone').value.trim();
+            const btn = document.getElementById('btnLeadSubmit');
+            btn.disabled = true;
+            btn.textContent = 'กำลังส่ง...';
+
+            try {
+                const res = await fetch('/api/lead/request_pdf', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, phone, session_id: currentSessionId })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    alert('🎉 ' + data.message);
+                    closeRequestPdfModal();
+                } else {
+                    alert(data.message || 'เกิดข้อผิดพลาด');
+                }
+            } catch (err) {
+                console.error(err);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'ส่งรายงาน';
+            }
+        }
+
+        function openProModal() {
+            document.getElementById('proModal').classList.remove('hidden');
+            document.getElementById('proModal').classList.add('flex');
+        }
+
+        function closeProModal() {
+            document.getElementById('proModal').classList.add('hidden');
+            document.getElementById('proModal').classList.remove('flex');
+        }
+
+        async function openAdminLogsModal() {
+            document.getElementById('adminLogsModal').classList.remove('hidden');
+            document.getElementById('adminLogsModal').classList.add('flex');
+
+            const tbody = document.getElementById('adminLogsTbody');
+            tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-slate-500">กำลังดึง Audit Logs...</td></tr>`;
+
+            try {
+                const res = await fetch('/api/admin/logs');
+                const data = await res.json();
+
+                if (data.success && data.logs.length > 0) {
+                    tbody.innerHTML = data.logs.map(log => `
+                        <tr class="hover:bg-slate-900/60">
+                            <td class="py-2 px-3 font-mono text-slate-400">${log.timestamp}</td>
+                            <td class="py-2 px-3 font-semibold text-white truncate max-w-[120px]">${log.file_name}</td>
+                            <td class="py-2 px-3 text-orange-400 font-mono">${log.processing_duration_sec}s</td>
+                            <td class="py-2 px-3">
+                                ${log.status === 'SUCCESS' 
+                                    ? '<span class="text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded">สำเร็จ</span>' 
+                                    : '<span class="text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded">ไม่สำเร็จ (' + (log.missing_reasons[0] || 'แบบไม่ครบ') + ')</span>'}
+                            </td>
+                            <td class="py-2 px-3 text-slate-300 font-mono">${log.lead_email ? `<span class="text-emerald-400 font-bold">${log.lead_email}</span>` : '<span class="text-slate-600">-</span>'}</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    tbody.innerHTML = `<tr><td colspan="5" class="py-6 text-center text-slate-500">ยังไม่มีประวัติการถอดแบบ</td></tr>`;
+                }
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="5" class="py-4 text-center text-red-400">ไม่สามารถโหลดข้อมูลได้</td></tr>`;
+            }
+        }
+
+        function closeAdminLogsModal() {
+            document.getElementById('adminLogsModal').classList.add('hidden');
+            document.getElementById('adminLogsModal').classList.remove('flex');
+        }
+    </script>
+</body>
+</html>

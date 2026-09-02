@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.class
+
+# Environment variables & secrets
+.env
+.env.*
+*.secret
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Editor directories and files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Runtime logs
+logs/
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
