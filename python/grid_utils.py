@@ -69,6 +69,46 @@ def find_page_with_most_markers(doc, marker_re, min_count=3):
     return best_pno if best_count >= min_count else None
 
 
+SHEET_CODE_RE = re.compile(r"^[A-Z]{1,3}-\d{1,3}$")
+
+
+def find_sheet_code_by_description(doc, description_keywords, index_min_count=8):
+    """หาแผ่นเป้าหมายผ่าน**สารบัญแบบ (สheet index)** ของเอกสารเอง แทนการเดาเลขแผ่นตรงๆ -- ธรรมเนียมที่
+    เจอจริงข้ามหลายโปรเจกต์ (Thai technical drawing sets) คือเกือบทุกไฟล์มีหน้าสารบัญที่แจกแจง "รหัสแผ่น:
+    คำอธิบาย" ครบทุกแผ่น แต่**รหัสแผ่นที่ตรงกับความหมายเดียวกัน (เช่น "แปลนพื้น") ไม่เหมือนกันข้ามโปรเจกต์
+    เลย** (ยืนยันจริง: โปรเจกต์หนึ่งแปลนพื้น=A-05 อีกโปรเจกต์=A-03) -- จึงต้องอ่านสารบัญของไฟล์นั้นเองก่อน
+    ทุกครั้ง ไม่ hardcode รหัสแผ่นใดๆ
+
+    วิธีหา: หน้าสารบัญมีลักษณะเด่นชัด (นับได้ง่าย ไม่ต้องพึ่งหัวข้อภาษาไทยที่อาจเพี้ยน) คือมีข้อความรูป
+    แบบ "X-NN" (เช่น A-01, S-05) เรียงกันเป็นสิบๆ รายการในหน้าเดียว -- มากกว่าแผ่นแบบอื่นใดๆ ที่ปกติมีแค่
+    รหัสแผ่นตัวเอง 1 รหัส หรืออ้างอิงแผ่นอื่นผ่าน callout ไม่กี่จุด
+
+    description_keywords: list ของคำที่ต้องเจอทุกคำในคำอธิบายของแถวเดียวกัน (AND) -- คืน (sheet_code,
+    description) ของแถวแรกที่ตรง หรือ (None, None) ถ้าไม่เจอหน้าสารบัญ/ไม่เจอแถวที่ตรงเลย"""
+    best_pno, best_count = None, 0
+    for pno in range(len(doc)):
+        spans = extract_fixed_spans(doc[pno])
+        count = sum(1 for s in spans if SHEET_CODE_RE.match(s["text"].strip().upper()))
+        if count > best_count:
+            best_pno, best_count = pno, count
+    if best_pno is None or best_count < index_min_count:
+        return None, None
+
+    spans = extract_fixed_spans(doc[best_pno])
+    codes = [(s["text"].strip().upper(), *center(s["bbox"])) for s in spans if SHEET_CODE_RE.match(s["text"].strip().upper())]
+    others = [(s["text"].strip(), *center(s["bbox"])) for s in spans
+              if not SHEET_CODE_RE.match(s["text"].strip().upper()) and s["text"].strip()]
+    for code, cx, cy in codes:
+        # คำอธิบายอยู่แถวเดียวกัน (y ใกล้กัน) ทางขวาของรหัสแผ่นเสมอ (รูปแบบตารางสารบัญมาตรฐาน)
+        cands = sorted((c for c in others if abs(c[2] - cy) < 6 and c[1] > cx), key=lambda c: c[1])
+        if not cands:
+            continue
+        desc = cands[0][0]
+        if all(k in desc for k in description_keywords):
+            return code, desc
+    return None, None
+
+
 def find_drawing_page_by_title_block(doc, drawing_no, bottom_fraction=0.88):
     """หาหน้าที่มีป้าย "DRAWING NO." ตรงกับ drawing_no เป๊ะๆ โดยดูเฉพาะข้อความที่อยู่ค่อนไปทางล่างสุด
     ของหน้า (title block) เท่านั้น -- แม่นกว่า find_drawing_page เดิมเพราะไม่ต้องพึ่ง marker ของแต่ละ
