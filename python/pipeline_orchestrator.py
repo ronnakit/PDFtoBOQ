@@ -1,7 +1,9 @@
 """PDFtoBOQ -- Pipeline orchestrator: เรียกทุกหมวดที่มี แล้วประกอบเป็นผลลัพธ์เดียว (confirm_boq.json)
 
 Phase C (2569-09-02): เพิ่มคาน (โค้ดล้วนสำหรับสเปค + AI vision สำหรับเรขาคณิต, ครอบคลุมเฉพาะคานระหว่าง
-จุดเสาที่ยืนยันแล้ว -- status "partial_coverage" เสมอ) -- พื้นยังไม่เชื่อมเข้ามา
+จุดเสาที่ยืนยันแล้ว -- status "partial_coverage" เสมอ) + เชื่อมพื้น (`extract_floor_boq.py`, อ่านจาก
+MD/floor_data.md ที่ยืนยันกับเจ้าของโปรเจกต์แล้วเท่านั้น -- ไม่มีทางอ่านห้อง/ผนังภายในอัตโนมัติแม่นยำ
+ได้จากตัวแบบเพียงอย่างเดียว ดู extract_floor_boq.py หัวไฟล์)
 
 คำนวณคอนกรีต/เหล็กด้วยสูตร/ค่าคงที่มาตรฐาน (ค่าฟิสิกส์วัสดุ ใช้ร่วมได้ทุกโปรเจกต์ -- ตรงกับกฎที่
 เอกสารพิมพ์เขียวยึดไว้: ห้ามฝังค่าที่ยืนยันเฉพาะโปรเจกต์เป็นค่าคงที่ในสคริปต์ แต่สูตร/ค่าฟิสิกส์วัสดุ
@@ -21,6 +23,7 @@ from datetime import datetime
 import fitz
 
 from extract_beam_boq import extract_beam_takeoff
+from extract_floor_boq import compute_floor_boq, load_project_floor_data
 from extract_footing_boq import extract_footing_takeoff
 from extract_pier_column_boq import extract_pier_column_takeoff
 from extract_roof_boq import extract_roof_takeoff
@@ -175,6 +178,37 @@ def compute_beam_summary(beam_result):
     }
 
 
+def run_floor_extraction(project_dir):
+    """เรียก extract_floor_boq.py จริง -- ห้องพัก/พื้นที่ไม่มีทางอ่านอัตโนมัติแม่นยำได้จากตัวแบบเพียง
+    อย่างเดียว (ผนังภายในไม่ตรงกับกริดโครงสร้าง) จึงต้องมี MD/floor_data.md ที่ยืนยันกับเจ้าของโปรเจกต์
+    แล้วก่อนเสมอ (ดู docstring extract_floor_boq.py) -- ถ้ายังไม่มีไฟล์นี้ของโปรเจกต์ที่กำลังถอดอยู่ คืน
+    สถานะ not_implemented แบบทั่วไป ไม่ใส่ตัวเลข/เหตุผลของโปรเจกต์อื่นมาปนแทน"""
+    if not project_dir:
+        return {"status": "not_implemented",
+                "notes": ["ไม่ได้ระบุ project_dir -- หา MD/floor_data.md ไม่ได้"]}
+    try:
+        room_list, params = load_project_floor_data(project_dir)
+    except FileNotFoundError as e:
+        return {"status": "not_implemented", "notes": [str(e)]}
+    result = compute_floor_boq(room_list, params)
+    return {"status": "computed", **result}
+
+
+def compute_floor_summary(floor_result):
+    if floor_result.get("status") != "computed":
+        return {"status": floor_result.get("status", "not_implemented")}
+    return {
+        "status": "computed",
+        "concrete_m3_net": floor_result.get("total_concrete_m3"),
+        "concrete_m3_with_waste": round(floor_result["total_concrete_m3"] * (1 + STRUCTURAL_CONCRETE_WASTE), 3),
+        "rebar_kg_net": floor_result.get("s1_rebar", {}).get("main_mesh_rb9_kg", 0)
+                        + floor_result.get("s1_rebar", {}).get("chair_rb6_kg", 0),
+        "note": f"พื้นที่รวม {floor_result.get('total_area_m2')} ตร.ม. (HC {floor_result.get('hc_area_m2')} + "
+                f"S1 {floor_result.get('s1_area_m2')}) -- ห้อง/พื้นที่มาจาก MD/floor_data.md ที่ยืนยันกับ"
+                f"เจ้าของโปรเจกต์แล้ว ไม่ใช่อ่านอัตโนมัติจากตัวแบบ",
+    }
+
+
 def run_pipeline(pdf_path, project_dir=None):
     doc = fitz.open(pdf_path)
     page_count = len(doc)
@@ -192,6 +226,9 @@ def run_pipeline(pdf_path, project_dir=None):
     beam = extract_beam_takeoff(pdf_path)
     beam_summary = compute_beam_summary(beam)
 
+    floor = run_floor_extraction(project_dir)
+    floor_summary = compute_floor_summary(floor)
+
     result = {
         "pdftoboq_version": "phase-c-2569-09-02",
         "generated_at": datetime.now().isoformat(),
@@ -201,17 +238,7 @@ def run_pipeline(pdf_path, project_dir=None):
             "footing": {**footing, "summary": footing_summary},
             "pier_column": {**pier_column, "summary": pier_column_summary},
             "beam": {**beam, "summary": beam_summary},
-            "floor": {
-                "status": "not_implemented",
-                "notes": [
-                    "ลองแล้ว (2569-09-02): จับคู่ป้าย S1/PS บนแผ่นคาน-พื้น (S-06) เข้ากับ 'ช่องกริดโครงสร้าง' "
-                    "ที่ใกล้ที่สุด แล้วคำนวณพื้นที่จากขนาดช่องกริด -- ผลออกมาคลาดเคลื่อนมาก (S1 ได้ 19.25 "
-                    "ตร.ม. เทียบกับพื้นที่จริงที่วัดจากขอบเขตห้องบนแบบสถาปัตย์ 14.34 ตร.ม. คลาดเคลื่อน "
-                    "+34%) เพราะห้องน้ำ/ห้องเล็กไม่ได้มีขอบเขตตรงกับช่องกริดโครงสร้าง (เป็นผนังภายในที่ไม่ "
-                    "ปรากฏในแบบคาน) -- ไม่ปล่อยตัวเลขที่รู้อยู่แล้วว่าคลาดเคลื่อนสูง ต้องอ่านขอบเขตห้องจริง "
-                    "จากแบบสถาปัตย์ (A-05 หรือเทียบเท่า) ด้วย AI vision ก่อน ยังไม่ได้ทำ (รอ Phase C ต่อ)",
-                ],
-            },
+            "floor": {**floor, "summary": floor_summary},
             "roof": {**roof, "summary": roof_summary},
         },
     }
