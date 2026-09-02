@@ -10,7 +10,8 @@
 ตัวเลขในตารางไม่ได้เลยสักตัว)
 
 วิธีทำงาน:
-1. หาแผ่นแบบที่มีตารางนี้ (ลอง S-07 ก่อน แล้ว S-08) ด้วย grid_utils.find_drawing_page_by_title_block
+1. หาแผ่นแบบที่มีตารางนี้จาก**เนื้อหาหัวตารางเอง** (ค้นทุกหน้า ไม่ใช้เลขแผ่นเป็นตัวกรอง เพราะเลขแผ่น
+   เป็นธรรมเนียมเฉพาะสำนักงานออกแบบแต่ละที่ ไม่สื่อความหมายเดียวกันข้ามโปรเจกต์ -- ยืนยันแล้วกับหมวดอื่น)
 2. หาตำแหน่งตาราง**แบบ dynamic ไม่ hardcode พิกัด** -- ค้นข้อความ "ถอดปริมาณ"+"หลังคา" ที่ยังอ่านได้
    เป็นหัวตาราง (แม้ตัวข้อมูลในตารางจะ flatten แต่หัวข้อตารางมักเป็น text จริง) ใช้ตำแหน่งนั้นเป็นขอบบน
    แล้ว crop กว้างพอไปทางขวา+ลงล่างของหน้า เรนเดอร์ที่ dpi สูง (300) เพื่อให้ AI อ่านตัวเลขได้แม่นที่สุด
@@ -26,10 +27,11 @@
 ขอบเขต: เฉพาะเหล็กโครงสร้างหลังคา -- แผ่นมุงหลังคา/เชิงชายเป็นงานสถาปัตย์ ไม่รวมในนี้
 
 Usage:
-    python extract_roof_boq.py <pdf_path> [--drawing-no S-07]
+    python extract_roof_boq.py <pdf_path>
 """
 import argparse
 import json
+import re
 import sys
 
 import fitz
@@ -108,13 +110,29 @@ def _find_table_crop_region(page, spans):
     return fitz.Rect(crop_x0, crop_y0, crop_x1, crop_y1)
 
 
-def extract_roof_takeoff(pdf_path, drawing_no_candidates=("S-07", "S-08")):
+SHEET_NUMBER_RE = re.compile(r"^[A-Z]{1,3}-\d{2,3}$")
+
+
+def _read_sheet_number(page, spans, bottom_fraction=0.88):
+    """อ่านเลขแผ่น (เช่น "S-07") จาก title block ท้ายหน้าแบบ dynamic -- ใช้แค่โชว์อ้างอิงในผลลัพธ์
+    เท่านั้น ไม่ใช่ใช้หาแผ่น (หาแผ่นด้วยเนื้อหาหัวตารางแทน ดู _find_table_crop_region)"""
+    h = page.rect.height
+    for s in spans:
+        text = s["text"].strip().upper()
+        y = (s["bbox"][1] + s["bbox"][3]) / 2
+        if SHEET_NUMBER_RE.match(text) and y > h * bottom_fraction:
+            return text
+    return None
+
+
+def extract_roof_takeoff(pdf_path):
+    """หาแผ่นที่มีตาราง "ถอดปริมาณ...หลังคา" **จากเนื้อหาหัวตารางเอง** (`_find_table_crop_region`
+    ค้นด้วย `TABLE_TITLE_KEYWORDS` อยู่แล้ว) ไล่ทุกหน้าในเอกสาร -- ไม่ใช้เลขแผ่น (`S-07`/`S-08` เดิม)
+    เป็นตัวกรองหน้าอีกต่อไป เพราะเลขแผ่นเป็นธรรมเนียมเฉพาะสำนักงานออกแบบแต่ละที่ ไม่สื่อความหมายเดียวกัน
+    ข้ามโปรเจกต์ (ยืนยันแล้วกับหมวดอื่นในไฟล์นี้ -- ดู grid_utils.py)"""
     doc = fitz.open(pdf_path)
 
-    for drawing_no in drawing_no_candidates:
-        pno = grid_utils.find_drawing_page_by_title_block(doc, drawing_no)
-        if pno is None:
-            continue
+    for pno in range(len(doc)):
         page = doc[pno]
         spans = extract_fixed_spans(page)
         clip = _find_table_crop_region(page, spans)
@@ -175,7 +193,7 @@ def extract_roof_takeoff(pdf_path, drawing_no_candidates=("S-07", "S-08")):
         return {
             "status": "computed",
             "drawing_page": pno + 1,
-            "drawing_no": drawing_no,
+            "drawing_no": _read_sheet_number(page, spans),
             "items": items,
             "non_structural_rows": non_structural,
             "total_length_structural_m": round(total_length_structural, 2),
@@ -187,8 +205,8 @@ def extract_roof_takeoff(pdf_path, drawing_no_candidates=("S-07", "S-08")):
 
     return {
         "status": "not_found",
-        "notes": ["ไม่พบตาราง 'ถอดปริมาณงานโครงสร้างคานเหล็กหลังคา' ในแผ่น S-07/S-08 -- อาจไม่มีตารางนี้ "
-                  "ในโปรเจกต์นี้ (ผู้ออกแบบบางรายไม่สรุปให้) ต้องนับเส้นจากแบบเอง (ยังไม่รองรับ)"],
+        "notes": ["ไม่พบตาราง 'ถอดปริมาณงานโครงสร้างคานเหล็กหลังคา' ในหน้าไหนของเอกสารเลย -- อาจไม่มี "
+                  "ตารางนี้ในโปรเจกต์นี้ (ผู้ออกแบบบางรายไม่สรุปให้) ต้องนับเส้นจากแบบเอง (ยังไม่รองรับ)"],
         "items": [], "non_structural_rows": [],
     }
 

@@ -67,7 +67,7 @@ def parse_table_from_lines(lines):
                 table_rows.append(cols)
     return table_rows
 
-def create_structural_pdf(project_name='116-69 - แบบบ้านชั้นเดียว'):
+def create_structural_pdf(project_name, owner_name=None, site_address=None):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     project_dir = os.path.join(base_dir, '..', 'project', project_name)
     md_path = os.path.join(project_dir, 'markdown', 'confirm_boq.md')
@@ -108,12 +108,12 @@ def create_structural_pdf(project_name='116-69 - แบบบ้านชั้�
 
     meta_data = [
         [
-            Paragraph(f'<b>โครงการ:</b> {project_name} (คุณนุชรินทร์ สิริใหม่)', body_style),
-            Paragraph('<b>สถานที่:</b> ต.หนองยวง อ.เวียงหนองล่อง จ.ลำพูน', body_style),
+            Paragraph(f'<b>โครงการ:</b> {project_name}' + (f' ({owner_name})' if owner_name else ''), body_style),
+            Paragraph(f'<b>สถานที่:</b> {site_address or "(ไม่ระบุ)"}', body_style),
         ],
         [
-            Paragraph('<b>เครื่องมือประมวลผล:</b> Plan2BOQ Dynamic Engine (อ่านจาก confirm_boq.md สด 100%)', body_style),
-            Paragraph('<b>สถานะการตรวจสอบ:</b> สกัดตรงจากแบบ 116-69 (แผ่น S-01 ถึง S-11, A-04, A-09)', body_style)
+            Paragraph('<b>เครื่องมือประมวลผล:</b> PDFtoBOQ Dynamic Engine (อ่านจาก confirm_boq.md สด 100%)', body_style),
+            Paragraph('<b>สถานะการตรวจสอบ:</b> สกัดตรงจากแบบก่อสร้างของโครงการนี้', body_style)
         ]
     ]
     t_meta = Table(meta_data, colWidths=[277, 278])
@@ -217,9 +217,10 @@ def create_structural_pdf(project_name='116-69 - แบบบ้านชั้�
     qa_box = [
         [
             Paragraph(
-                '<b>หมายเหตุการประมวลผล (Plan2BOQ Dynamic Engine):</b><br/>'
-                '• สกัดข้อมูลปริมาณงานตามแบบก่อสร้างจริงของโครงการ 116-69 (คุณนุชรินทร์ สิริใหม่) ครอบคลุม ฐานราก 18 ฐาน, เสา C1 18 ต้น, คาน B1-B4, CB, พื้น PS/S1, และโครงหลังคาเหล็ก 2C-150<br/>'
-                '• รายการเหล็กเสริมผ่านการจัดเรียงตัดเศษเหล็กด้วยอัลกอริทึม First-Fit-Decreasing (FFD) ช่วยลดของเสียลงได้ 30 เส้น (~300 ม.)',
+                '<b>หมายเหตุการประมวลผล (PDFtoBOQ Dynamic Engine):</b><br/>'
+                '• สกัดข้อมูลปริมาณงานตามแบบก่อสร้างจริงของโครงการนี้ — ตัวเลขทั้งหมดในรายงานนี้มาจาก '
+                f'confirm_boq.md ของโครงการ {project_name} เท่านั้น<br/>'
+                '• รายการเหล็กเสริม (ถ้ามีการตัดเศษ) ผ่านการจัดเรียงด้วยอัลกอริทึม First-Fit-Decreasing (FFD)',
                 body_style
             )
         ]
@@ -238,6 +239,8 @@ def create_structural_pdf(project_name='116-69 - แบบบ้านชั้�
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--project-name', default='116-69 - แบบบ้านชั้นเดียว', help='Project name')
+    parser.add_argument('--project-name', required=True, help='Project folder name under project/')
+    parser.add_argument('--owner-name', default=None, help='Project owner name (for report header)')
+    parser.add_argument('--site-address', default=None, help='Site address (for report header)')
     args = parser.parse_args()
-    create_structural_pdf(project_name=args.project_name)
+    create_structural_pdf(project_name=args.project_name, owner_name=args.owner_name, site_address=args.site_address)

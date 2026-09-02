@@ -45,7 +45,7 @@ def parse_table_from_lines(lines):
                 table_rows.append(cols)
     return table_rows
 
-def generate_excel_boq(project_name='116-69 - แบบบ้านชั้นเดียว'):
+def generate_excel_boq(project_name):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     project_dir = os.path.join(base_dir, '..', 'project', project_name)
     md_path = os.path.join(project_dir, 'markdown', 'confirm_boq.md')
@@ -140,6 +140,6 @@ def generate_excel_boq(project_name='116-69 - แบบบ้านชั้น�
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--project-name', default='116-69 - แบบบ้านชั้นเดียว', help='Project name')
+    parser.add_argument('--project-name', required=True, help='Project folder name under project/')
     args = parser.parse_args()
     generate_excel_boq(args.project_name)

@@ -15,13 +15,15 @@ loaded directly and the PDF is NOT re-read — per the Journey
 (03-ai-boq-procedure.md): never repeat Stage 0 once done for a project.
 
 Usage:
-    python extract_foundation_data.py <pdf_path> [--cover-page 1] [--site-page 2]
-        [--index-page 3] [--spec-page 4] [--force]
+    python extract_foundation_data.py <pdf_path> --cover-page N --site-page N
+        --index-page N --spec-page N [--force]
 
-Page numbers are 1-indexed and are specific to THIS project's layout (newhouse:
-1=cover, 2=A-01 site plan, 3=A-02 index, 4=A-03 spec) — a different project may
-order these differently; identify them by content before running, not by
-assuming the same page numbers.
+Page numbers are 1-indexed. All four are REQUIRED, no defaults — page order is
+specific to each project's own drawing set (e.g. one project: 1=cover, 2=site
+plan, 3=index, 4=spec; another project may order these completely differently
+or split them across more pages). Identify each page by its actual content
+(open the PDF, read the sheet titles) before running — never assume any fixed
+page numbers apply to a new project.
 """
 import argparse
 import base64
@@ -405,10 +407,14 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("pdf_path")
     ap.add_argument("--project-label", default=None, help="human-readable project name for the .md title")
-    ap.add_argument("--cover-page", type=int, default=1)
-    ap.add_argument("--site-page", type=int, default=2)
-    ap.add_argument("--index-page", type=int, default=3)
-    ap.add_argument("--spec-page", type=int, default=4)
+    # ไม่มี default -- เลขหน้าปก/ผังบริเวณ/สารบัญ/สัญลักษณ์ เป็นเลย์เอาต์เฉพาะของแต่ละโปรเจกต์ ไม่มี
+    # ความหมายร่วมข้ามโปรเจกต์ (เคยมี default=1/2/3/4 ตรงกับ newhouse พอดี ทำให้รันกับ PDF อื่นแล้วอ่าน
+    # หน้าผิดแบบเงียบๆ โดยไม่ error) -- ต้องระบุทุกครั้งหลังไล่ดูสารบัญ/หน้าจริงของโปรเจกต์นั้นก่อน
+    # (บังคับเฉพาะโหมดปกติ -- --recrop-only ใช้แค่ --index-page เดียว เช็คแยกด้านล่าง)
+    ap.add_argument("--cover-page", type=int, default=None)
+    ap.add_argument("--site-page", type=int, default=None)
+    ap.add_argument("--index-page", type=int, default=None)
+    ap.add_argument("--spec-page", type=int, default=None)
     ap.add_argument("--force", action="store_true", help="re-extract even if foundation_data.md exists")
     ap.add_argument("--out-path", default=None,
                      help="override the output .md path (e.g. for a side-by-side test run) "
@@ -418,6 +424,13 @@ def main():
                           "images from its (possibly hand-edited) bbox_pct numbers, and rewrite "
                           "the file - no API calls, use this after nudging a box's coordinates")
     args = ap.parse_args()
+
+    if args.recrop_only:
+        if args.index_page is None:
+            ap.error("--recrop-only ต้องระบุ --index-page ด้วย (เลขหน้าสารบัญ/สัญลักษณ์ของโปรเจกต์นี้)")
+    elif None in (args.cover_page, args.site_page, args.index_page, args.spec_page):
+        ap.error("ต้องระบุ --cover-page --site-page --index-page --spec-page ครบทั้ง 4 ค่า "
+                  "(ไล่ดูหน้าจริงของโปรเจกต์นี้ก่อน ไม่มี default เพราะแต่ละโปรเจกต์เรียงหน้าไม่เหมือนกัน)")
 
     # project root = the folder that CONTAINS the "PDF" subfolder the file sits in
     # (project/new house/PDF/xxx.pdf -> project/new house/foundation_data.md),
