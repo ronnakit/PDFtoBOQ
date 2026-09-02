@@ -35,6 +35,57 @@ FOOTING_CODE_RE = re.compile(r"^F[0-9]+$")
 
 STRUCTURAL_CONCRETE_WASTE = 0.03
 
+FOOTING_SPEC_VISION_PROMPT = """หน้านี้เป็นแบบก่อสร้างวิศวกรรมโครงสร้าง (แบบขยาย) มีหลายตารางในหน้าเดียว
+หาตารางที่ชื่อ "แบบขยายฐานราก" (footing detail schedule) ซึ่งมีคอลัมน์หัวตาราง F, T, A x B, N# และแถว
+ข้อมูลรหัส F1, F2, F3 (หรือรหัส Fx อื่นๆ ที่มี) อ่านค่าทุกแถวแล้วตอบเป็น JSON ล้วนๆ เท่านั้น ไม่มีข้อความ
+อื่นใดๆ ในรูปแบบนี้:
+{"items": [{"code": "F1", "thickness_m": 0.25, "size_m": [0.60, 0.60], "rebar": "5+5-DB12mm"}, ...]}
+thickness_m และ size_m ต้องเป็นหน่วยเมตร (แปลงจากหน่วยอื่นถ้าตารางไม่ได้เขียนเป็นเมตร) ถ้าหาตารางนี้
+ไม่เจอในภาพเลย ให้ตอบ {"items": [], "error": "not_found"}"""
+
+
+def _apply_vision_footing_specs(pdf_path, items, drawing_no="S-09"):
+    """เติม thickness_m/rebar ให้ items ที่ยังเป็น None ด้วย AI vision อ่านตารางสเปคที่ flatten เป็น
+    vector (page.get_text() อ่านไม่ได้จริง) -- เรียก AI แค่ครั้งเดียวต่อไฟล์ (เรนเดอร์ทั้งหน้า S-09
+    ครั้งเดียว) ไม่ใช่ครั้งละรายการ. คืน (items, notes) -- ถ้าเรียก AI ไม่สำเร็จ (ไม่มี API key, error,
+    หรือ parse ไม่ได้) items จะไม่ถูกแก้ไข แค่เติม note อธิบายไว้ ไม่ทำให้ pipeline ทั้งหมดล้ม."""
+    notes = []
+    try:
+        import ai_vision_fallback
+    except ImportError as e:
+        notes.append(f"ข้าม AI vision fallback: import ไม่สำเร็จ ({e})")
+        return items, notes
+
+    doc = fitz.open(pdf_path)
+    pno = grid_utils.find_drawing_page_by_title_block(doc, drawing_no)
+    if pno is None:
+        notes.append(f"ข้าม AI vision fallback: ไม่พบหน้าแบบ {drawing_no}")
+        return items, notes
+
+    try:
+        img = ai_vision_fallback.render_page_png(doc[pno], dpi=150)
+        result = ai_vision_fallback.call_vision_json(img, FOOTING_SPEC_VISION_PROMPT)
+    except Exception as e:
+        notes.append(f"AI vision fallback ล้มเหลว: {e}")
+        return items, notes
+
+    if result.get("_parse_error") or result.get("error") or not result.get("items"):
+        notes.append(f"AI vision อ่านตารางสเปคฐานรากไม่สำเร็จ (หน้า {pno + 1}): {result}")
+        return items, notes
+
+    by_code = {row["code"]: row for row in result["items"] if row.get("code")}
+    filled = []
+    for item in items:
+        spec = by_code.get(item["code"])
+        if spec and item["thickness_m"] is None:
+            item["thickness_m"] = spec.get("thickness_m")
+            item["rebar"] = spec.get("rebar")
+            item["status"] = "confirmed_via_ai_vision"
+            filled.append(item["code"])
+    if filled:
+        notes.append(f"เติมความหนา+เหล็กเสริมจาก AI vision อ่านหน้า {pno + 1} ({drawing_no}): {', '.join(filled)}")
+    return items, notes
+
 
 def extract_pier_footing_pairs(spans):
     piers, footings = [], []
@@ -64,7 +115,8 @@ def extract_pier_footing_pairs(spans):
     return pairs
 
 
-def extract_footing_takeoff(pdf_path, drawing_no="S-05", page_index=None):
+def extract_footing_takeoff(pdf_path, drawing_no="S-05", page_index=None, spec_drawing_no="S-09",
+                             use_vision_fallback=True):
     doc = fitz.open(pdf_path)
     if page_index is None:
         pno = grid_utils.find_drawing_page(doc, drawing_no, marker_re=PIER_CODE_RE)
@@ -139,9 +191,14 @@ def extract_footing_takeoff(pdf_path, drawing_no="S-05", page_index=None):
     unmatched = [p["pier_code"] for p in pairs if not p["footing_code"]]
     if unmatched:
         notes.append(f"จับคู่รหัสฐานรากไม่ได้ {len(unmatched)} จุด: {', '.join(unmatched)}")
+
+    if use_vision_fallback and any(i["thickness_m"] is None for i in items):
+        items, vision_notes = _apply_vision_footing_specs(pdf_path, items, drawing_no=spec_drawing_no)
+        notes.extend(vision_notes)
+
     if any(i["thickness_m"] is None for i in items):
-        notes.append("ยังไม่มีความหนา (T) และเหล็กเสริม -- ตารางสเปคฐานรากมักถูก flatten เป็น vector "
-                      "อ่านด้วย text ไม่ได้ ต้องรอ Phase B (AI vision fallback)")
+        notes.append("ยังไม่มีความหนา (T) และเหล็กเสริมสำหรับบางรายการ -- ตารางสเปคฐานรากมักถูก flatten "
+                      "เป็น vector อ่านด้วย text ไม่ได้ และ AI vision fallback อ่านไม่สำเร็จ/ไม่ได้เปิดใช้")
 
     return {
         "status": "positions_and_sizes_confirmed" if items and all(i["size_m"] for i in items) else "partial",

@@ -46,7 +46,7 @@ def build_takeoff_summary(pipeline_result):
         concrete = summary.get("concrete_m3_with_waste")
         steel = 0.0
         steel_known = False
-        for steel_key in ("main_bar_kg_with_waste", "stirrup_kg_with_waste"):
+        for steel_key in ("main_bar_kg_with_waste", "stirrup_kg_with_waste", "rebar_kg_with_waste", "steel_kg_with_waste"):
             if summary.get(steel_key) is not None:
                 steel += summary[steel_key]
                 steel_known = True

@@ -31,11 +31,33 @@ def center(bbox):
     return (x0 + x1) / 2.0, (y0 + y1) / 2.0
 
 
+def find_drawing_page_by_title_block(doc, drawing_no, bottom_fraction=0.88):
+    """หาหน้าที่มีป้าย "DRAWING NO." ตรงกับ drawing_no เป๊ะๆ โดยดูเฉพาะข้อความที่อยู่ค่อนไปทางล่างสุด
+    ของหน้า (title block) เท่านั้น -- แม่นกว่า find_drawing_page เดิมเพราะไม่ต้องพึ่ง marker ของแต่ละ
+    หมวด และไม่หลงไปจับหน้าสารบัญที่แค่ "พูดถึง" รหัสนี้ในตาราง (title block ของ AutoCAD template ส่วน
+    ใหญ่วางไว้ท้ายหน้าเสมอ). คืน None ถ้าไม่เจอ -- ให้ผู้เรียก fallback ไปใช้ find_drawing_page แทน."""
+    target = drawing_no.upper().strip()
+    for pno in range(len(doc)):
+        page = doc[pno]
+        h = page.rect.height
+        spans = extract_fixed_spans(page)
+        for s in spans:
+            text = s["text"].strip().upper()
+            y = (s["bbox"][1] + s["bbox"][3]) / 2
+            if text == target and y > h * bottom_fraction:
+                return pno
+    return None
+
+
 def find_drawing_page(doc, drawing_no, min_marker_count=3, marker_re=None):
     """หาหน้าที่มีป้าย DRAWING NO. ตรงกับ drawing_no (เช่น 'S-05') จริง -- แยกจากหน้าสารบัญที่
-    แค่ "พูดถึง" รหัสนี้ในตาราง โดยเช็คว่าหน้านั้นต้องมีป้ายที่ตรงกับ marker_re อยู่หลายจุดด้วย
-    (ค่าเริ่มต้น: รหัสตอม่อ Cx เพราะใช้หาแบบฐานราก/ตอม่อได้บ่อยสุด -- ปรับ marker_re ได้ตามหมวด
-    เช่นหาแผนคานให้ใช้ regex ของป้ายชื่อคาน)."""
+    แค่ "พูดถึง" รหัสนี้ในตาราง ลองด้วย title block ก่อน (แม่นสุด, ดู find_drawing_page_by_title_block)
+    แล้วค่อย fallback ไปเช็คว่าหน้านั้นมีป้ายที่ตรงกับ marker_re อยู่หลายจุด (เผื่อ template ไม่ได้วาง
+    title block ไว้ตำแหน่งมาตรฐาน) (ค่าเริ่มต้น marker_re: รหัสตอม่อ Cx -- ปรับได้ตามหมวด)."""
+    pno = find_drawing_page_by_title_block(doc, drawing_no)
+    if pno is not None:
+        return pno
+
     if marker_re is None:
         marker_re = re.compile(r"^C[0-9A-Za-z]+$")
     target = drawing_no.upper()

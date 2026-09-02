@@ -1,7 +1,8 @@
 """PDFtoBOQ -- Pipeline orchestrator: เรียกทุกหมวดที่มี แล้วประกอบเป็นผลลัพธ์เดียว (confirm_boq.json)
 
-Phase A (2569-09-02): ฐานราก + ตอม่อ-เสา เท่านั้น (โค้ดล้วน 100%, ไม่มีต้นทุน AI) -- คาน/พื้น/
-หลังคา ยังไม่เชื่อมเข้ามา (Phase C ต่อไป) เพื่อไม่ให้ /api/takeoff ต้องรอทุกหมวดเสร็จพร้อมกัน
+Phase B (2569-09-02): ฐานราก + ตอม่อ-เสา, ฐานรากตอนนี้เติมความหนา+เหล็กเสริมด้วย AI vision fallback
+(อ่านตารางสเปคที่ flatten เป็น vector บนแผ่น S-09) แล้ว -- คาน/พื้น/หลังคา ยังไม่เชื่อมเข้ามา (Phase C
+ต่อไป) เพื่อไม่ให้ /api/takeoff ต้องรอทุกหมวดเสร็จพร้อมกัน
 
 คำนวณคอนกรีต/เหล็กด้วยสูตร/ค่าคงที่มาตรฐาน (ค่าฟิสิกส์วัสดุ ใช้ร่วมได้ทุกโปรเจกต์ -- ตรงกับกฎที่
 เอกสารพิมพ์เขียวยึดไว้: ห้ามฝังค่าที่ยืนยันเฉพาะโปรเจกต์เป็นค่าคงที่ในสคริปต์ แต่สูตร/ค่าฟิสิกส์วัสดุ
@@ -14,6 +15,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 from datetime import datetime
 
@@ -21,32 +23,57 @@ import fitz
 
 from extract_footing_boq import extract_footing_takeoff
 from extract_pier_column_boq import extract_pier_column_takeoff
+from extract_roof_boq import extract_roof_takeoff
 
 STRUCTURAL_CONCRETE_WASTE = 0.03
 REBAR_WEIGHT_WASTE = 0.05
 DB12_KG_PER_M = 0.888
 RB6_KG_PER_M = 0.222
-COVER_IN_SOIL_M = 0.05
+FOOTING_REBAR_COVER_M = 0.05
 STIRRUP_HOOK_ALLOWANCE_M = 0.10
 STIRRUP_SPACING_DEFAULT_M = 0.15
 
+FOOTING_REBAR_RE = re.compile(r"^(\d+)\+(\d+)-DB\s*(\d+)", re.IGNORECASE)
+
 
 def compute_footing_summary(footing_result):
-    """เติมปริมาตรคอนกรีตต่อรายการ -- คำนวณได้เฉพาะรายการที่มีความหนา (T) แล้วเท่านั้น (ส่วนใหญ่
-    ยังไม่มีใน Phase A เพราะตารางสเปคมักถูก flatten -- ดู notes ของแต่ละรายการ)."""
+    """เติมปริมาตรคอนกรีต+น้ำหนักเหล็กต่อรายการ -- คำนวณคอนกรีตได้เฉพาะรายการที่มีความหนา (T) แล้ว
+    เท่านั้น (เติมจาก AI vision fallback ใน extract_footing_boq.py ถ้าตารางสเปคไม่ถูก flatten ก็ไม่ต้อง
+    พึ่ง AI เลย) -- เหล็กเสริมพาร์สจากรูปแบบ "N+N-DBxx mm." (จำนวนเหล็กแต่ละทิศ x ขนาด) ความยาวเหล็กต่อ
+    เส้นประมาณจากด้านของฐานรากลบ cover 2 ด้าน (ค่าประมาณ safe-side เพราะยังไม่รู้ทิศทางวางเหล็กจริงจาก
+    แบบ, ต่างจากที่คำนวณตอม่อ-เสาที่รู้ทิศทางชัดเจนกว่า)."""
     total_concrete = 0.0
-    computed_any = False
+    total_rebar_kg = 0.0
+    concrete_computed = False
+    rebar_computed = False
+
     for item in footing_result.get("items", []):
         if item.get("size_m") and item.get("thickness_m"):
             vol_each = item["size_m"][0] * item["size_m"][1] * item["thickness_m"]
             item["concrete_m3_each"] = round(vol_each, 4)
             item["concrete_m3_total"] = round(vol_each * item["count"], 4)
             total_concrete += item["concrete_m3_total"]
-            computed_any = True
+            concrete_computed = True
+
+        m = FOOTING_REBAR_RE.match(item.get("rebar") or "")
+        if m and item.get("size_m"):
+            n1, n2, db_size = int(m.group(1)), int(m.group(2)), m.group(3)
+            bar_len = max(item["size_m"][0], item["size_m"][1]) - 2 * FOOTING_REBAR_COVER_M
+            kg_per_m = DB12_KG_PER_M if db_size == "12" else DB12_KG_PER_M  # เผื่อไซส์อื่นในอนาคต
+            rebar_kg_each = (n1 + n2) * bar_len * kg_per_m
+            item["rebar_kg_each"] = round(rebar_kg_each, 2)
+            item["rebar_kg_total"] = round(rebar_kg_each * item["count"], 2)
+            total_rebar_kg += item["rebar_kg_total"]
+            rebar_computed = True
+
+    computed_any = concrete_computed or rebar_computed
     return {
-        "concrete_m3_net": round(total_concrete, 3) if computed_any else None,
-        "concrete_m3_with_waste": round(total_concrete * (1 + STRUCTURAL_CONCRETE_WASTE), 3) if computed_any else None,
-        "status": "computed" if computed_any else "blocked_needs_thickness_spec",
+        "concrete_m3_net": round(total_concrete, 3) if concrete_computed else None,
+        "concrete_m3_with_waste": round(total_concrete * (1 + STRUCTURAL_CONCRETE_WASTE), 3) if concrete_computed else None,
+        "rebar_kg_net": round(total_rebar_kg, 2) if rebar_computed else None,
+        "rebar_kg_with_waste": round(total_rebar_kg * (1 + REBAR_WEIGHT_WASTE), 2) if rebar_computed else None,
+        "status": "computed" if (concrete_computed and rebar_computed) else ("partial" if computed_any else "blocked_needs_thickness_spec"),
+        "note": "ความยาวเหล็กประมาณจากด้านฐานรากลบ cover -- ยังไม่รู้ทิศทางวางจริงจากแบบ (safe-side estimate)" if rebar_computed else None,
     }
 
 
@@ -109,6 +136,22 @@ def compute_pier_column_summary(pc_result):
     }
 
 
+def compute_roof_summary(roof_result):
+    """แปลงผลลัพธ์จาก extract_roof_boq.py (คำนวณน้ำหนักในตัวอยู่แล้วเพราะเป็นหมวดที่ใช้ AI vision เป็น
+    วิธีหลัก ไม่ใช่ fallback) ให้เข้ารูปแบบ summary เดียวกับหมวดอื่น (concrete_m3.../steel_kg...)."""
+    if roof_result.get("status") != "computed":
+        return {"status": roof_result.get("status", "not_implemented")}
+    return {
+        "status": "computed",
+        "concrete_m3_net": None,
+        "concrete_m3_with_waste": None,
+        "steel_kg_net": roof_result.get("total_weight_kg_net"),
+        "steel_kg_with_waste": roof_result.get("total_weight_kg_with_waste"),
+        "note": f"เหล็กโครงสร้างหลังคารวม {roof_result.get('total_length_structural_m')}ม. "
+                f"(ไม่รวมวัสดุครอบสัน/ครอบหลังคา {sum(r.get('total_length_m') or 0 for r in roof_result.get('non_structural_rows', [])):.2f}ม. ที่ไม่มีสเปคหน้าตัดเหล็ก)",
+    }
+
+
 def run_pipeline(pdf_path, project_dir=None):
     doc = fitz.open(pdf_path)
     page_count = len(doc)
@@ -120,8 +163,11 @@ def run_pipeline(pdf_path, project_dir=None):
     pier_column = extract_pier_column_takeoff(pdf_path)
     pier_column_summary = compute_pier_column_summary(pier_column)
 
+    roof = extract_roof_takeoff(pdf_path)
+    roof_summary = compute_roof_summary(roof)
+
     result = {
-        "pdftoboq_version": "phase-a-2569-09-02",
+        "pdftoboq_version": "phase-b-2569-09-02",
         "generated_at": datetime.now().isoformat(),
         "pdf_path": pdf_path,
         "page_count": page_count,
@@ -130,7 +176,7 @@ def run_pipeline(pdf_path, project_dir=None):
             "pier_column": {**pier_column, "summary": pier_column_summary},
             "beam": {"status": "not_implemented", "notes": ["รอ Phase C"]},
             "floor": {"status": "not_implemented", "notes": ["รอ Phase C"]},
-            "roof": {"status": "not_implemented", "notes": ["รอ Phase B (ตารางผู้ออกแบบมักเป็นภาพ)"]},
+            "roof": {**roof, "summary": roof_summary},
         },
     }
 

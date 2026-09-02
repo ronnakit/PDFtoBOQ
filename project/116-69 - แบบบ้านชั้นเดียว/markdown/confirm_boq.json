@@ -1,6 +1,6 @@
 {
-  "pdftoboq_version": "phase-a-2569-09-02",
-  "generated_at": "2026-09-02T16:17:03.835198",
+  "pdftoboq_version": "phase-b-2569-09-02",
+  "generated_at": "2026-09-02T18:43:08.235234",
   "pdf_path": "../project/116-69 - แบบบ้านชั้นเดียว/PDF/116-69 - แบบบ้านชั้นเดียว.pdf",
   "page_count": 47,
   "categories": {
@@ -9,7 +9,7 @@
       "drawing_page": 33,
       "scale_denominator": 75.0,
       "notes": [
-        "ยังไม่มีความหนา (T) และเหล็กเสริม -- ตารางสเปคฐานรากมักถูก flatten เป็น vector อ่านด้วย text ไม่ได้ ต้องรอ Phase B (AI vision fallback)"
+        "เติมความหนา+เหล็กเสริมจาก AI vision อ่านหน้า 37 (S-09): F1, F2, F3"
       ],
       "items": [
         {
@@ -19,13 +19,15 @@
             0.6,
             0.6
           ],
-          "thickness_m": null,
-          "rebar": null,
-          "concrete_m3_each": null,
-          "concrete_m3_total": null,
+          "thickness_m": 0.25,
+          "rebar": "5+5-DB12mm.#",
+          "concrete_m3_each": 0.09,
+          "concrete_m3_total": 0.09,
           "source": "vector_geometry",
-          "status": "needs_vision_for_spec",
-          "area_m2_each": 0.36
+          "status": "confirmed_via_ai_vision",
+          "area_m2_each": 0.36,
+          "rebar_kg_each": 4.44,
+          "rebar_kg_total": 4.44
         },
         {
           "code": "F2",
@@ -34,13 +36,15 @@
             1.2,
             1.2
           ],
-          "thickness_m": null,
-          "rebar": null,
-          "concrete_m3_each": null,
-          "concrete_m3_total": null,
+          "thickness_m": 0.25,
+          "rebar": "8+8-DB12mm.#",
+          "concrete_m3_each": 0.36,
+          "concrete_m3_total": 3.6,
           "source": "vector_geometry",
-          "status": "needs_vision_for_spec",
-          "area_m2_each": 1.44
+          "status": "confirmed_via_ai_vision",
+          "area_m2_each": 1.44,
+          "rebar_kg_each": 15.63,
+          "rebar_kg_total": 156.29
         },
         {
           "code": "F3",
@@ -49,13 +53,15 @@
             1.4,
             1.4
           ],
-          "thickness_m": null,
-          "rebar": null,
-          "concrete_m3_each": null,
-          "concrete_m3_total": null,
+          "thickness_m": 0.25,
+          "rebar": "11+11-DB12mm.#",
+          "concrete_m3_each": 0.49,
+          "concrete_m3_total": 3.43,
           "source": "vector_geometry",
-          "status": "needs_vision_for_spec",
-          "area_m2_each": 1.96
+          "status": "confirmed_via_ai_vision",
+          "area_m2_each": 1.96,
+          "rebar_kg_each": 25.4,
+          "rebar_kg_total": 177.78
         }
       ],
       "positions": [
@@ -224,9 +230,12 @@
       ],
       "total_count": 18,
       "summary": {
-        "concrete_m3_net": null,
-        "concrete_m3_with_waste": null,
-        "status": "blocked_needs_thickness_spec"
+        "concrete_m3_net": 7.12,
+        "concrete_m3_with_waste": 7.334,
+        "rebar_kg_net": 338.51,
+        "rebar_kg_with_waste": 355.44,
+        "status": "computed",
+        "note": "ความยาวเหล็กประมาณจากด้านฐานรากลบ cover -- ยังไม่รู้ทิศทางวางจริงจากแบบ (safe-side estimate)"
       }
     },
     "pier_column": {
@@ -280,10 +289,136 @@
       ]
     },
     "roof": {
-      "status": "not_implemented",
+      "status": "computed",
+      "drawing_page": 35,
+      "drawing_no": "S-07",
+      "items": [
+        {
+          "name_th": "จันที่นเหล็ก C 100 x 50 x 20 x 2.3 m @ 1.00 m",
+          "profile": "C",
+          "double": false,
+          "dim1_mm": 100,
+          "dim2_mm": 50,
+          "dim3_mm": 20,
+          "thickness_mm": 2.3,
+          "total_length_m": 193.94,
+          "weight_kg_net": 808.17
+        },
+        {
+          "name_th": "คิงเหล็ก 2C 100 x 50 x 20 x 2.3 mm",
+          "profile": "C",
+          "double": true,
+          "dim1_mm": 100,
+          "dim2_mm": 50,
+          "dim3_mm": 20,
+          "thickness_mm": 2.3,
+          "total_length_m": 8.34,
+          "weight_kg_net": 69.51
+        },
+        {
+          "name_th": "คิงเหล็ก 2C-100x50x20x2.3 mm",
+          "profile": "C",
+          "double": true,
+          "dim1_mm": 100,
+          "dim2_mm": 50,
+          "dim3_mm": 20,
+          "thickness_mm": 2.3,
+          "total_length_m": 12.93,
+          "weight_kg_net": 107.76
+        },
+        {
+          "name_th": "ตะเยื่อรางเหล็ก 2C-100x50x20x2.3 mm",
+          "profile": "C",
+          "double": true,
+          "dim1_mm": 100,
+          "dim2_mm": 50,
+          "dim3_mm": 20,
+          "thickness_mm": 2.3,
+          "total_length_m": 3.81,
+          "weight_kg_net": 31.75
+        },
+        {
+          "name_th": "ตะเยื่อสัมเหล็ก 2C-100x50x20x2.3 mm",
+          "profile": "C",
+          "double": true,
+          "dim1_mm": 100,
+          "dim2_mm": 50,
+          "dim3_mm": 20,
+          "thickness_mm": 2.3,
+          "total_length_m": 50.35,
+          "weight_kg_net": 419.63
+        },
+        {
+          "name_th": "สะพานรับจันที่นเหล็ก C 100 x 50 x 20 x 2.3 mm",
+          "profile": "C",
+          "double": false,
+          "dim1_mm": 100,
+          "dim2_mm": 50,
+          "dim3_mm": 20,
+          "thickness_mm": 2.3,
+          "total_length_m": 36.42,
+          "weight_kg_net": 151.77
+        },
+        {
+          "name_th": "อกไก่เหล็ก 2C-100x50x20x2.3 mm",
+          "profile": "C",
+          "double": true,
+          "dim1_mm": 100,
+          "dim2_mm": 50,
+          "dim3_mm": 20,
+          "thickness_mm": 2.3,
+          "total_length_m": 6.3,
+          "weight_kg_net": 52.51
+        },
+        {
+          "name_th": "อะเสเหล็ก 2C-100x50x20x3.2 mm",
+          "profile": "C",
+          "double": true,
+          "dim1_mm": 100,
+          "dim2_mm": 50,
+          "dim3_mm": 20,
+          "thickness_mm": 3.2,
+          "total_length_m": 107.62,
+          "weight_kg_net": 1228.43
+        },
+        {
+          "name_th": "แป่นเหล็กกล่อง 25x25x1.6 mm.@0.31-0.34 m.",
+          "profile": "box",
+          "double": false,
+          "dim1_mm": 25,
+          "dim2_mm": 25,
+          "dim3_mm": null,
+          "thickness_mm": 1.6,
+          "total_length_m": 606.3,
+          "weight_kg_net": 712.78
+        }
+      ],
+      "non_structural_rows": [
+        {
+          "name_th": "ครอบสันตะเยื่อทระเบื่องแป่นเรียมตราเพชร",
+          "total_length_m": 40.67
+        },
+        {
+          "name_th": "ครอบสันหลังการทะเบื่องแป่นเรียมตราเพชร",
+          "total_length_m": 10.2
+        }
+      ],
+      "total_length_structural_m": 1026.01,
+      "total_weight_kg_net": 3582.31,
+      "total_weight_kg_with_waste": 3761.43,
+      "grand_total_length_m_per_designer": 1076.87,
       "notes": [
-        "รอ Phase B (ตารางผู้ออกแบบมักเป็นภาพ)"
-      ]
+        "น้ำหนักคำนวณจากสูตรฟิสิกส์ (พื้นที่หน้าตัด x ความหนาแน่นเหล็ก 7850 กก./ลบ.ม.) ไม่ใช่ตาราง kg/m จากแค็ตตาล็อก -- คลาดเคลื่อนเล็กน้อยได้จากรัศมีมุมพับจริงของแต่ละโรงงาน",
+        "รายการที่ไม่มีสเปคหน้าตัดเหล็ก (เช่นวัสดุครอบสัน/ครอบหลังคา) แยกไว้ใน non_structural_rows ไม่รวมในน้ำหนักเหล็กโครงสร้าง"
+      ],
+      "summary": {
+        "status": "computed",
+        "concrete_m3_net": null,
+        "concrete_m3_with_waste": null,
+        "steel_kg_net": 3582.31,
+        "steel_kg_with_waste": 3761.43,
+        "note": "เหล็กโครงสร้างหลังคารวม 1026.01ม. (ไม่รวมวัสดุครอบสัน/ครอบหลังคา 50.87ม. ที่ไม่มีสเปคหน้าตัดเหล็ก)"
+      }
     }
   }
 }
