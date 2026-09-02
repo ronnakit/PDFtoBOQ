@@ -37,10 +37,13 @@ import grid_utils
 from extract_footing_boq import extract_footing_takeoff
 from thai_font_fix import extract_fixed_spans
 
-BEAM_CODE_RE = re.compile(r"^(B[0-9]+|CB)$")
+BEAM_CODE_RE = re.compile(r"^(B[0-9]+|CB|GB)$")
 REBAR_COUNT_RE = re.compile(r"^(\d+)-DB\s*(\d+)\s*mm\.?$", re.IGNORECASE)
-STIRRUP_RE = re.compile(r"^RB\s*(\d+)\s*mm\.?\s*@=?\s*([\d.]+)\s*mm\.?$", re.IGNORECASE)
+# ตัวอักษรนำหน้า "-RB" ต่างกันได้ต่อสำนักงานออกแบบ (เหมือนที่พบในตารางสเปคเสา) และหน่วยระยะห่างก็
+# รองรับทั้ง มม./ม.
+STIRRUP_RE = re.compile(r"^.?-?RB\s*(\d+)\s*mm\.?\s*@=?\s*([\d.]+)\s*(mm\.?|m\.?)?$", re.IGNORECASE)
 SIZE_MM_RE = re.compile(r"^(\d+)\s*[xX]\s*(\d+)\s*mm\.?$")
+BARE_DECIMAL_RE = re.compile(r"^(\d+\.\d+)$")
 
 STRUCTURAL_CONCRETE_WASTE = 0.03
 REBAR_WEIGHT_WASTE = 0.05
@@ -52,67 +55,176 @@ GEOMETRY_VISION_MODEL = "claude-sonnet-5"
 CROP_MARGIN_PT = 150
 
 
+def _cluster_by_axis(values, gap):
+    """จัดกลุ่มค่าตัวเลข (x หรือ y) ที่ใกล้กันเป็นแถว/คอลัมน์เดียวกัน -- คั่นกลุ่มเมื่อช่องว่างระหว่าง
+    ค่าที่เรียงแล้วเกิน gap"""
+    ordered = sorted(values)
+    groups = [[ordered[0]]]
+    for v in ordered[1:]:
+        if v - groups[-1][-1] > gap:
+            groups.append([v])
+        else:
+            groups[-1].append(v)
+    return groups
+
+
+def _assign_type_code(x, y, type_cells, row_reps, style, row_gap=80):
+    """หา TYPE cell ที่ span (x, y) เป็นของ โดยแบ่งเป็นแถวก่อน (ตามตำแหน่ง y ของ TYPE cell เอง)
+    แล้วค่อยแบ่งคอลัมน์ภายในแถวนั้นด้วย x -- ใช้เส้นแบ่งกึ่งกลางระหว่าง TYPE cell ที่ติดกัน
+
+    การแบ่งแถว **ไม่ใช้ระยะ 2D/มิดพอยต์ระหว่างป้าย** เพราะบล็อกข้อมูลของคานหนึ่งตัวมักกินพื้นที่แนวตั้ง
+    มากกว่าครึ่งระยะห่างระหว่างแถว ทำให้ข้อมูลปลายบล็อกถูกดึงไปเป็นของแถวถัดไปผิดๆ ถ้าใช้มิดพอยต์ -- ใช้
+    กฎ floor/ceiling ตาม style ที่ตรวจพบแทน (label_top: ข้อมูลอยู่หลังป้ายเสมอ -> แถวของ span คือป้าย
+    ล่าสุดที่ y <= span y, label_bottom: ข้อมูลอยู่ก่อนป้ายเสมอ -> แถวของ span คือป้ายถัดไปที่ y >= span y)"""
+    if style == "label_top":
+        row_idx = 0
+        for i, r in enumerate(row_reps):
+            if r <= y:
+                row_idx = i
+    else:
+        row_idx = len(row_reps) - 1
+        for i in range(len(row_reps) - 1, -1, -1):
+            if row_reps[i] >= y:
+                row_idx = i
+    cell_row = {i: min(range(len(row_reps)), key=lambda ri: abs(c[2] - row_reps[ri])) for i, c in enumerate(type_cells)}
+    row_cells = [c for i, c in enumerate(type_cells) if cell_row[i] == row_idx]
+    row_cells.sort(key=lambda c: c[1])
+    col_bounds = [(row_cells[i][1] + row_cells[i + 1][1]) / 2 for i in range(len(row_cells) - 1)]
+    col_idx = 0
+    for b in col_bounds:
+        if x >= b:
+            col_idx += 1
+        else:
+            break
+    return row_cells[col_idx][0]
+
+
+def _build_schedule_for_style(candidates, type_cells, row_reps, style):
+    """สร้างตารางสเปคคานจาก candidate spans ทั้งหมด โดยกำหนดรหัสคานของแต่ละ span ด้วย style
+    (label_top/label_bottom) ที่ระบุ -- คืน dict {code: spec} เฉพาะรหัสที่มีข้อมูลเหล็กจริง (db)"""
+    blocks = {code: {"db": [], "rb": [], "size_mm": [], "size_bare": []} for code, _, _ in type_cells}
+    for s, t, x, y in candidates:
+        code = _assign_type_code(x, y, type_cells, row_reps, style)
+
+        m = REBAR_COUNT_RE.match(t)
+        if m:
+            blocks[code]["db"].append((int(m.group(1)), m.group(2), y))
+            continue
+        m = STIRRUP_RE.match(t)
+        if m:
+            spacing_raw = float(m.group(2))
+            spacing_m = spacing_raw / 1000.0 if spacing_raw > 10 else spacing_raw
+            blocks[code]["rb"].append((m.group(1), spacing_m, y))
+            continue
+        m = SIZE_MM_RE.match(t)
+        if m:
+            blocks[code]["size_mm"].append((int(m.group(1)), int(m.group(2))))
+            continue
+        m = BARE_DECIMAL_RE.match(t)
+        if m:
+            blocks[code]["size_bare"].append(float(m.group(1)))
+
+    schedule = {}
+    for code, d in blocks.items():
+        if not d["db"]:
+            continue
+        # เส้นแบ่งบน/ล่าง: ใช้ตำแหน่ง y ของป้ายปลอก (RB) เป็นตัวแบ่งถ้ามี (แม่นกว่า เพราะแต่ละ
+        # section คู่มีปลอกอยู่ตรงกลางเหล็กบน/ล่างเป๊ะ) ถ้าไม่มีปลอกเลย fallback เป็นค่ากลางของช่วง y
+        if d["rb"]:
+            divider = sum(y for _, _, y in d["rb"]) / len(d["rb"])
+        else:
+            ys = sorted({y for _, _, y in d["db"]})
+            divider = (ys[0] + ys[-1]) / 2 if len(ys) > 1 else ys[0]
+        top = [n for n, _, y in d["db"] if y <= divider]
+        bottom = [n for n, _, y in d["db"] if y > divider]
+        db_size = d["db"][0][1]
+        max_top = max(top) if top else max(n for n, _, _ in d["db"])
+        max_bottom = max(bottom) if bottom else max_top
+        min_spacing = min((sp for _, sp, _ in d["rb"]), default=None)
+        stirrup_size = d["rb"][0][0] if d["rb"] else None
+
+        if d["size_mm"]:
+            w, h = d["size_mm"][0]
+            size_m = [w / 1000, h / 1000]
+        elif d["size_bare"]:
+            size_m = [round(min(d["size_bare"]), 3), round(max(d["size_bare"]), 3)]
+        else:
+            size_m = None
+
+        schedule[code] = {
+            "size_m": size_m,
+            "top_bar_count": max_top, "bottom_bar_count": max_bottom, "db_size": db_size,
+            "stirrup_size": stirrup_size, "stirrup_spacing_m": min_spacing,
+        }
+    return schedule
+
+
 def parse_beam_schedule(doc):
-    """หาแผ่นตารางขยายคาน (มี TOP BAR + STIRRUP ปรากฏ) แล้วดึงสเปคทุกรหัสด้วย nearest-type-header
-    clustering -- ไม่ hardcode ตำแหน่งหน้า/พิกัด ใช้ได้กับ layout ตารางหลายบล็อกต่อหน้าทั่วไป."""
+    """หาแผ่นตารางขยายคาน แล้วดึงสเปคทุกรหัสด้วย grid-based clustering (แบ่งแถวตาม y ของ TYPE cell
+    ก่อน แล้วแบ่งคอลัมน์ตาม x ภายในแถวนั้น ใช้เส้นแบ่งกึ่งกลางระหว่าง cell ที่ติดกัน) -- ไม่ hardcode
+    ตำแหน่งหน้า/พิกัด/ป้ายหัวตาราง ("TOP BAR"/"STIRRUP") เพราะบางไฟล์ไม่มีป้ายหัวตารางเลย มีแต่ตัวเลข
+    วางตำแหน่งสัมพัทธ์กับรูปตัด (เหล็กบน วาดเหนือเส้นปลอก, เหล็กล่าง วาดใต้เส้นปลอก) -- ใช้ตำแหน่งของ
+    span ปลอก (RB) ที่ใกล้สุดในแต่ละ block เป็นเส้นแบ่งบน/ล่างแทน
+
+    ไม่เดา label_top/label_bottom จากตำแหน่งเดียว (เจอ false positive จากข้อความอื่นในหน้าที่บังเอิญ
+    match regex เดียวกัน เช่น scale/เลขแผ่นใกล้ขอบบน) -- ลองสร้างตารางทั้งสอง style แล้วเลือก style ที่
+    ทำให้รหัสคานมีข้อมูลเหล็ก (db) ครบมากกว่า (style ที่ผิดมักทำให้บาง TYPE cell ทั้งแถวไม่มีข้อมูลเลย
+    เพราะข้อมูลของแถวนั้นถูกดึงไปแถวข้างเคียงหมด)"""
     for pno in range(len(doc)):
         spans = extract_fixed_spans(doc[pno])
         texts = [s["text"].strip() for s in spans]
-        if "TOP BAR" not in texts or "STIRRUP" not in texts:
-            continue
 
         type_cells = [(t, *grid_utils.center(s["bbox"])) for s, t in zip(spans, texts) if BEAM_CODE_RE.match(t)]
-        if not type_cells:
+        if len(type_cells) < 2:
+            # หน้าที่มีป้ายรหัสคานแค่จุดเดียวมักเป็นการพูดถึงเฉยๆ (เช่นหน้าอธิบายคำย่อ "GB = Ground
+            # Beam") ไม่ใช่ตารางสเปคจริง -- ตารางสเปคจริงต้องมีหลายรหัสคานอยู่ด้วยกันเสมอ
             continue
 
-        blocks = {code: {"db": [], "rb": [], "size": []} for code, _, _ in type_cells}
-        for s, t in zip(spans, texts):
-            x, y = grid_utils.center(s["bbox"])
-            candidates = [(code, cx, cy) for code, cx, cy in type_cells if cy <= y + 5]
-            if not candidates:
-                continue
-            code = min(candidates, key=lambda c: (x - c[1]) ** 2 + (y - c[2]) ** 2)[0]
+        # จำกัดขอบเขตการค้นด้วย bounding box ของ TYPE cell ทั้งหมด (ขยายออกด้วย margin แนวนอน+แนวตั้ง
+        # กว้าง เพราะบล็อกข้อมูลคานหนึ่งตัวอาจกินพื้นที่ทั้งแนวนอน/แนวตั้งเป็นร้อยจุด ไกลจากป้ายของตัวเอง
+        # เช่น 116-69 ที่แต่ละ TYPE cell มี 3 sub-column ห่างจากป้ายได้ถึง 100 จุด) -- กันไม่ให้ตารางอื่น
+        # บนหน้าเดียวกัน (เช่นตารางสเปคเสาที่ไม่มี TYPE cell เป็นของตัวเอง) ถูกดูดเข้ามาเป็นของคานทั้งที่
+        # ไม่เกี่ยวกัน โดยไม่ต้องใช้ระยะตัดขาดคงที่ตายตัว
+        margin_x, margin_y = 120, 250
+        cell_xs = [cx for _, cx, _ in type_cells]
+        cell_ys = [cy for _, _, cy in type_cells]
+        box = (min(cell_xs) - margin_x, min(cell_ys) - margin_y, max(cell_xs) + margin_x, max(cell_ys) + margin_y)
 
-            m = REBAR_COUNT_RE.match(t)
-            if m:
-                blocks[code]["db"].append((int(m.group(1)), m.group(2), y))
-                continue
-            m = STIRRUP_RE.match(t)
-            if m:
-                blocks[code]["rb"].append((m.group(1), float(m.group(2)) / 1000))
-                continue
-            m = SIZE_MM_RE.match(t)
-            if m:
-                blocks[code]["size"].append((int(m.group(1)), int(m.group(2))))
-
-        schedule = {}
-        for code, d in blocks.items():
-            if not d["db"]:
-                continue
-            ys = sorted({y for _, _, y in d["db"]})
-            mid = (ys[0] + ys[-1]) / 2 if len(ys) > 1 else ys[0]
-            top = [n for n, _, y in d["db"] if y <= mid]
-            bottom = [n for n, _, y in d["db"] if y > mid]
-            db_size = d["db"][0][1]
-            max_top = max(top) if top else max(n for n, _, _ in d["db"])
-            max_bottom = max(bottom) if bottom else max_top
-            min_spacing = min((sp for _, sp in d["rb"]), default=None)
-            stirrup_size = d["rb"][0][0] if d["rb"] else None
-            size_mm = d["size"][0] if d["size"] else None
-            schedule[code] = {
-                "size_m": [size_mm[0] / 1000, size_mm[1] / 1000] if size_mm else None,
-                "top_bar_count": max_top, "bottom_bar_count": max_bottom, "db_size": db_size,
-                "stirrup_size": stirrup_size, "stirrup_spacing_m": min_spacing,
-            }
+        candidates = [(s, t, *grid_utils.center(s["bbox"])) for s, t in zip(spans, texts)
+                      if box[0] <= grid_utils.center(s["bbox"])[0] <= box[2]
+                      and box[1] <= grid_utils.center(s["bbox"])[1] <= box[3]]
+        if not candidates:
+            continue
+        row_reps = sorted(sum(g) / len(g) for g in _cluster_by_axis([cy for _, _, cy in type_cells], 80))
+        if len(row_reps) < 2:
+            schedule = _build_schedule_for_style(candidates, type_cells, row_reps, "label_top")
+        else:
+            sched_top = _build_schedule_for_style(candidates, type_cells, row_reps, "label_top")
+            sched_bottom = _build_schedule_for_style(candidates, type_cells, row_reps, "label_bottom")
+            schedule = sched_top if len(sched_top) >= len(sched_bottom) else sched_bottom
         if schedule:
             return {"page": pno + 1, "schedule": schedule}
     return None
 
 
-def build_candidate_segments(doc, pier_positions, drawing_no="S-06"):
+def build_candidate_segments(doc, pier_positions, plan_page=None):
     """สร้างรายการช่วงกริดที่ *อาจ* มีคานทาบ จากตำแหน่งเสาที่ยืนยันแล้ว (จุดต่อเนื่องกันบนแถว/คอลัมน์
-    เดียวกัน) -- คำนวณความยาวจริงจากตำแหน่งกริด ไม่ต้องให้ AI อ่าน/บวกเลข."""
-    pno = grid_utils.find_drawing_page(doc, drawing_no)
+    เดียวกัน) -- คำนวณความยาวจริงจากตำแหน่งกริด ไม่ต้องให้ AI อ่าน/บวกเลข.
+
+    plan_page: เลขหน้า (0-indexed) ของแผ่นผังฐานราก/ตอม่อที่หาไว้แล้วจาก extract_footing_boq -- ใช้
+    ซ้ำเป็นค่าเริ่มต้นเสมอ เพราะตำแหน่งเสาที่ใช้สร้างช่วงคานก็มาจากแผ่นเดียวกันนี้อยู่แล้ว และหลายไฟล์
+    (ยืนยันจริง) มีทั้งแปลนฐานรากและแปลนคานพื้นรวมอยู่แผ่นเดียวกัน -- ถ้าไม่ระบุ (None) จะค้นหาแผ่นที่มี
+    เส้นกริด+สเกลเอง (แผ่นแรกในเอกสารที่มี)."""
+    if plan_page is not None:
+        pno = plan_page
+    else:
+        pno = None
+        for candidate in range(len(doc)):
+            spans_c = extract_fixed_spans(doc[candidate])
+            cols_c, rows_c = grid_utils.extract_grid(spans_c)
+            if len(cols_c) >= 2 and len(rows_c) >= 2 and grid_utils.find_scale_denominator(spans_c):
+                pno = candidate
+                break
     if pno is None:
         return None, None, None
     page = doc[pno]
@@ -199,17 +311,18 @@ def extract_beam_takeoff(pdf_path):
 
     schedule_result = parse_beam_schedule(doc)
     if schedule_result is None:
-        return {"status": "spec_not_found", "notes": ["ไม่พบตารางขยายคาน (ต้องมี TOP BAR + STIRRUP)"],
+        return {"status": "spec_not_found", "notes": ["ไม่พบตารางขยายคาน (ไม่มีป้ายรหัสคาน B1/B2/.../CB/GB คู่กับสเปคเหล็กที่อ่านได้เลย)"],
                 "items": []}
     schedule = schedule_result["schedule"]
 
     footing = extract_footing_takeoff(pdf_path, use_vision_fallback=False)
     pier_positions = [p["grid"] for p in footing.get("positions", []) if p.get("pier_code")]
+    footing_plan_page = (footing["drawing_page"] - 1) if footing.get("drawing_page") else None
     if not pier_positions:
         return {"status": "no_pier_positions", "notes": ["ต้องมีตำแหน่งเสาก่อน (extract_footing_boq)"],
                 "items": []}
 
-    pno, segments, clip = build_candidate_segments(doc, pier_positions)
+    pno, segments, clip = build_candidate_segments(doc, pier_positions, plan_page=footing_plan_page)
     if segments is None:
         return {"status": "geometry_not_found", "notes": ["หากริด/สเกลสำหรับวางตำแหน่งคานไม่เจอ"],
                 "items": []}
