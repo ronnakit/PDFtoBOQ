@@ -1,2 +1,6 @@
-ezdxf>=1.4
+pymupdf>=1.24        # fitz -- PDF text/vector extraction, used by the whole active pipeline
+anthropic>=1.0        # AI vision fallback (ai_vision_fallback.py) -- see .env for API key setup
+python-dotenv>=1.0    # loads ANTHROPIC_API_KEY from .env
+
+ezdxf>=1.4             # legacy CAD-parsing scripts (clean_dxf.py, classify_layers.py, etc.) -- not used by the active PDF pipeline
 xlrd==1.2.0  # legacy .xls reader -- modern xlrd (2.x) dropped .xls support, needed for read_ground_truth_boq.py
