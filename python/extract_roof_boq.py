@@ -59,21 +59,31 @@ ROOF_FRAME_VISION_PROMPT = """ภาพนี้คือแปลนโคร�
 **ไฟล์นี้ไม่มีตาราง "ถอดปริมาณ" สรุปความยาวรวมจากผู้ออกแบบ (ตรวจแล้ว) จึงต้องคำนวณความยาวรวมแต่ละชนิดเอง
 จากแปลน**
 
-งานของคุณ: สำหรับเหล็กแต่ละชนิดที่มีสเปคหน้าตัดชัดเจน (ไม่นับวัสดุมุงหลังคา/ครอบสันที่ไม่ใช่เหล็กโครงสร้าง)
+งานของคุณ: สำหรับวัสดุโครงหลังคาแต่ละชนิดในตาราง "รายการเหล็กโครงสร้างหลังคา" (รวมทั้งที่เป็นเหล็กหน้าตัด
+C/box มีขนาดชัดเจน และที่เป็นผลิตภัณฑ์สำเร็จรูป เช่น "แปสำเร็จรูปกัลวาไนซ์" ที่ไม่มีขนาดหน้าตัดระบุแต่มี
+ระยะห่าง @ กำกับ -- **อย่าข้ามรายการหลังนี้ไปเป็น non-structural เฉยๆ ต้องคำนวณความยาวรวมด้วยเสมอ**):
 1. name_th -- ชื่อชนิด (เช่น "อะเส", "จันทัน", "แป", "อกไก่", "ตั้ง")
-2. profile: "C" หรือ "box" (อ่านจากสเปคหน้าตัดในตาราง) หรือ "unknown" ถ้าไม่ใช่เหล็กโครงสร้าง
-3. double: true ถ้าสเปคมี "2C" นำหน้า, dim1_mm/dim2_mm/dim3_mm/thickness_mm จากสเปคหน้าตัดในตาราง
-4. total_length_m -- ความยาวรวมโดยประมาณ คำนวณจาก:
-   - อะเส/อกไก่: ความยาวตามแนวขอบ/สันที่วิ่งจริงในแปลน (วัดจากเส้นบอกระยะ/กริด)
-   - จันทัน/แป: จำนวนเส้น (ประมาณจากความยาวขอบหลังคา ÷ ระยะห่างที่ระบุ เช่น @1.00ม.) × ความยาวเฉลี่ยต่อเส้น
-     (ประมาณจากขนาดหลังคาที่เห็นในแปลน ถ้าไม่เห็นมุมลาดชัดเจนให้ใช้ระยะทางแนวราบจากขอบถึงสันเป็นค่าประมาณ
-     ระบุ confidence เป็น "estimated" เสมอสำหรับกรณีนี้)
+2. profile: "C" หรือ "box" ถ้าตารางระบุขนาดหน้าตัดชัดเจน (เช่น "2C-100x50x20x2.0mm"), หรือ "purchased_item"
+   ถ้าเป็นผลิตภัณฑ์สำเร็จรูปที่ตารางไม่ได้ให้ขนาดหน้าตัดมา (เช่น "แปสำเร็จรูปกัลวาไนซ์") -- ยังต้องคำนวณ
+   total_length_m ให้ด้วยแม้ profile จะเป็น purchased_item ก็ตาม (จะไม่คิดน้ำหนักเหล็กให้ภายหลัง แต่ความยาว
+   ยังจำเป็นสำหรับสั่งซื้อ)
+3. double: true ถ้าสเปคมี "2C" นำหน้า, dim1_mm/dim2_mm/dim3_mm/thickness_mm จากสเปคหน้าตัดในตาราง (null
+   ทั้งหมดถ้า profile เป็น purchased_item)
+4. spacing_m -- ระยะห่าง @ ที่ตารางระบุไว้สำหรับชนิดนี้ (เช่น จันทัน "@1.00ม." → 1.00, แป "@0.31-0.34ม."
+   → ใช้ค่ากลาง 0.325) null ถ้าไม่มีระยะห่างกำกับ (เช่น อะเส/อกไก่ที่วิ่งเป็นเส้นเดียวต่อเนื่อง)
+5. total_length_m -- ความยาวรวม คำนวณจาก:
+   - อะเส/อกไก่ (ไม่มี spacing_m): ความยาวตามแนวขอบ/สันที่วิ่งจริงในแปลน (วัดจากเส้นบอกระยะ/กริด)
+   - จันทัน/แป/ตั้ง (มี spacing_m): จำนวนเส้น = ความยาวขอบหลังคาที่ตั้งฉากกับแนวเส้นนั้น ÷ spacing_m
+     (ปัดขึ้น) × ความยาวเฉลี่ยต่อเส้น (ประมาณจากขนาดหลังคาที่เห็นในแปลน ถ้าไม่เห็นมุมลาดชัดเจนให้ใช้ระยะทาง
+     แนวราบจากขอบถึงสันเป็นค่าประมาณ ระบุ confidence เป็น "estimated" เสมอสำหรับกรณีนี้) -- ใช้ spacing_m
+     ที่อ่านได้จากตารางจริง ห้ามกะจำนวนเส้นเอาเองโดยไม่ใช้ระยะห่างนี้
 5. confidence: "measured" (คำนวณจากเส้นบอกระยะที่ชัดเจนครบ) หรือ "estimated" (ต้องประมาณเพราะไม่เห็นมุมลาด/
    เรขาคณิตที่ซับซ้อนเกินกว่าจะนับละเอียด)
 
 ตอบเป็น JSON ล้วนๆ เท่านั้น ไม่มีข้อความอื่น:
-{"rows": [{"name_th": "...", "profile": "C"|"box"|"unknown", "double": false, "dim1_mm": 0, "dim2_mm": 0,
-"dim3_mm": null, "thickness_mm": 0, "total_length_m": 0.0, "confidence": "measured"|"estimated"}]}"""
+{"rows": [{"name_th": "...", "profile": "C"|"box"|"purchased_item"|"unknown", "double": false,
+"dim1_mm": 0, "dim2_mm": 0, "dim3_mm": null, "thickness_mm": 0, "spacing_m": null,
+"total_length_m": 0.0, "confidence": "measured"|"estimated"}]}"""
 
 ROOF_TABLE_VISION_PROMPT = """ภาพนี้คือตาราง "ถอดปริมาณงานโครงสร้างคานเหล็กหลังคา" มี 2 คอลัมน์: ชนิด
 โครงสร้างเหล็กหลังคา, ความยาวโดยรวม (ม.) อ่านทุกแถว (รวมแถว Grand total ถ้ามี) แล้วตอบเป็น JSON ล้วนๆ
@@ -194,35 +204,46 @@ def _extract_roof_from_framing_plan(doc):
                 "notes": [f"AI vision อ่านแปลนโครงหลังคาไม่สำเร็จ (หน้า {pno + 1})", str(result.get("_raw"))[:300]],
                 "items": [], "non_structural_rows": []}
 
-    items, non_structural = [], []
+    items, purchased_items, non_structural = [], [], []
     total_length_structural = 0.0
     total_weight_net = 0.0
     estimated_count = 0
     for row in result["rows"]:
         name = row.get("name_th") or "?"
         length = row.get("total_length_m")
-        if row.get("profile") in ("C", "box") and length:
-            if row.get("confidence") == "estimated":
+        profile = row.get("profile")
+        confidence = row.get("confidence", "estimated")
+        if profile in ("C", "box") and length:
+            if confidence == "estimated":
                 estimated_count += 1
             kg_per_m = steel_profile_weight_kg_per_m(
-                row.get("profile"), row.get("dim1_mm"), row.get("dim2_mm"),
+                profile, row.get("dim1_mm"), row.get("dim2_mm"),
                 row.get("dim3_mm"), row.get("thickness_mm"), bool(row.get("double")),
             )
             weight = round(kg_per_m * length, 2) if kg_per_m else None
             items.append({
-                "name_th": name, "profile": row.get("profile"), "double": bool(row.get("double")),
+                "name_th": name, "profile": profile, "double": bool(row.get("double")),
                 "dim1_mm": row.get("dim1_mm"), "dim2_mm": row.get("dim2_mm"),
                 "dim3_mm": row.get("dim3_mm"), "thickness_mm": row.get("thickness_mm"),
-                "total_length_m": length, "weight_kg_net": weight,
-                "confidence": row.get("confidence", "estimated"),
+                "spacing_m": row.get("spacing_m"), "total_length_m": length, "weight_kg_net": weight,
+                "confidence": confidence,
             })
             total_length_structural += length
             if weight:
                 total_weight_net += weight
+        elif profile == "purchased_item" and length:
+            # ผลิตภัณฑ์สำเร็จรูป (เช่นแปกัลวาไนซ์) -- มีความยาวรวมให้สั่งซื้อ แต่ไม่มีขนาดหน้าตัดให้คิด
+            # น้ำหนักเหล็กแบบเดียวกับเหล็กรีดหน้าตัด (เหมือน HC พื้นสำเร็จรูปใน extract_floor_boq.py)
+            if confidence == "estimated":
+                estimated_count += 1
+            purchased_items.append({
+                "name_th": name, "spacing_m": row.get("spacing_m"), "total_length_m": length,
+                "confidence": confidence,
+            })
         else:
             non_structural.append({"name_th": name, "total_length_m": length})
 
-    if not items:
+    if not items and not purchased_items:
         return {"status": "vision_parse_failed",
                 "notes": [f"อ่านแปลนโครงหลังคาได้ (หน้า {pno + 1}) แต่ไม่พบเหล็กโครงสร้างที่มีสเปคหน้าตัดเลย"],
                 "items": [], "non_structural_rows": non_structural}
@@ -232,6 +253,7 @@ def _extract_roof_from_framing_plan(doc):
         "drawing_page": pno + 1,
         "drawing_no": code,
         "items": items,
+        "purchased_items": purchased_items,
         "non_structural_rows": non_structural,
         "total_length_structural_m": round(total_length_structural, 2),
         "total_weight_kg_net": round(total_weight_net, 2),
@@ -239,8 +261,11 @@ def _extract_roof_from_framing_plan(doc):
         "notes": [
             "ไม่มีตาราง 'ถอดปริมาณ' สรุปจากผู้ออกแบบ -- ให้ AI vision อ่านเรขาคณิต+ตารางสเปคจากแปลนโครง"
             "หลังคาโดยตรงแทน ความแม่นยำต่ำกว่าทางตารางสรุป โดยเฉพาะรายการที่ confidence=\"estimated\" "
-            f"({estimated_count}/{len(items)} รายการ) ซึ่งประมาณจากระยะห่าง@ ไม่ได้นับทีละเส้นจริง",
-            "น้ำหนักคำนวณจากสูตรฟิสิกส์ (พื้นที่หน้าตัด x ความหนาแน่นเหล็ก 7850 กก./ลบ.ม.)",
+            f"({estimated_count}/{len(items) + len(purchased_items)} รายการ) ซึ่งประมาณจากระยะห่าง@ ที่ "
+            "ตารางสเปคระบุไว้ ไม่ได้นับทีละเส้นจริง",
+            "น้ำหนักคำนวณจากสูตรฟิสิกส์ (พื้นที่หน้าตัด x ความหนาแน่นเหล็ก 7850 กก./ลบ.ม.) เฉพาะรายการที่มี"
+            "ขนาดหน้าตัดระบุ -- purchased_items (เช่นแปสำเร็จรูป) มีแต่ความยาวรวม ไม่มีน้ำหนักเหล็ก "
+            "เพราะเป็นผลิตภัณฑ์สำเร็จรูปราคาต่อเมตร/ชิ้น ไม่ใช่เหล็กรีดที่คำนวณน้ำหนักจากหน้าตัดได้",
         ],
     }
 

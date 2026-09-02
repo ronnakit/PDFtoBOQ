@@ -151,6 +151,11 @@ def compute_roof_summary(roof_result):
     is_estimate = status == "computed_from_framing_plan"
     note = (f"เหล็กโครงสร้างหลังคารวม {roof_result.get('total_length_structural_m')}ม. "
             f"(ไม่รวมวัสดุครอบสัน/ครอบหลังคา {sum(r.get('total_length_m') or 0 for r in roof_result.get('non_structural_rows', [])):.2f}ม. ที่ไม่มีสเปคหน้าตัดเหล็ก)")
+    purchased = roof_result.get("purchased_items") or []
+    if purchased:
+        note += (" | ผลิตภัณฑ์สำเร็จรูป (เช่นแป): " +
+                  ", ".join(f"{p['name_th']} {p.get('total_length_m')}ม." for p in purchased) +
+                  " -- ไม่มีน้ำหนักเหล็ก ราคาต่อเมตร/ชิ้นจากผู้จำหน่าย")
     if is_estimate:
         note += (" -- ไม่มีตารางสรุปจากผู้ออกแบบ คำนวณจากแปลนโครงหลังคาด้วย AI vision เอง "
                  "ความแม่นยำต่ำกว่าทางตารางสรุป ดู notes/confidence รายรายการ")
