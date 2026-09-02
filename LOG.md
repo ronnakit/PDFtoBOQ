@@ -47,15 +47,17 @@
 3. **ข้อตกลงและกระบวนการทำงานแบบรวดเดียวจบ (Autonomous Workflow):**
    - ดำเนินการทุกขั้นตอนแบบอัตโนมัติต่อเนื่องจนเสร็จสมบูรณ์ 100% โดยไม่ต้องหยุดรอถาม
 
-4. **จัดทำคลังเอกสารมาตรฐาน 10 หมวดหมู่ (Numbered Markdown Architecture):**
-   - รวบรวมและเรียบเรียงองค์ความรู้ทั้งหมดลงใน `D:\webapp\pdftoboq\markdown\` เรียงลำดับ 01 - 10 ครบถ้วน:
-     1. `01-product-overview-and-vision.md`
-     2. `02-market-and-business-model.md`
-     3. `03-structural-takeoff-procedure.md`
-     4. `04-boq-category-schema.md`
-     5. `05-technical-architecture.md`
-     6. `06-drawing-signal-and-quality-gate.md`
-     7. `07-bim-and-ground-truth-validation.md`
-     8. `08-vocabulary-and-symbol-standards.md`
-     9. `09-ai-engineer-development-protocol.md`
-     10. `10-phase1-mvp-specification.md`
+4. **จัดทำคลังเอกสารมาตรฐาน MD app (Numbered Markdown Architecture):**
+   - รวบรวมและเรียบเรียงองค์ความรู้ทั้งหมดลงใน `D:\webapp\pdftoboq\markdown\` เรียงลำดับ 00 - 13 ครบถ้วน พร้อม `README.md` เป็น Master Index
+
+5. **สถาปัตยกรรม Dynamic MD Engine 100%:**
+   - ลบค่าคงที่ (Hardcoded constants) ออกจากสคริปต์ `generate_pdf_report.py` และ `generate_excel_report.py` ทั้งหมด
+   - ปรับระบบให้อ่านข้อมูลแบบแปลนสดจาก `markdown/confirm_boq.md` และ `foundation_data.md` ของแต่ละโครงการโดยตรง
+
+6. **ถอดแบบและสอบทานความถูกต้องโครงการ 116-69 (คุณนุชรินทร์ สิริใหม่):**
+   - ถอดแบบจริงครบทั้ง 5 หมวดโครงสร้าง (ฐานราก 18 ฐาน, เสา C1 18 ต้น, คาน B1-B4, พื้น PS/S1, โครงหลังคาเหล็ก 2C)
+   - สอบทานตรงตาม Revit Schedule, รูปตัด S-09, ผัง S-05/S-06/S-07/S-08, A-04/A-05, A-09 100%
+   - จัดหน้าเล่มรายงาน PDF พอดีเป๊ะ 2 หน้า A4 ไม่มีล้นขอบ
+
+7. **เชื่อมต่อและบันทึกขึ้น GitHub Repository:**
+   - ผูก Git Remote ไปยัง Private Repository `https://github.com/ronnakit/PDFtoBOQ.git` บน Branch `main`
