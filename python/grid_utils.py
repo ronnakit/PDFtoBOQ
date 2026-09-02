@@ -31,6 +31,44 @@ def center(bbox):
     return (x0 + x1) / 2.0, (y0 + y1) / 2.0
 
 
+def find_page_by_content(doc, required_keywords, start=0, require_grid=False):
+    """หาแผ่นแบบจาก **หัวข้อ/เนื้อหาภาษาไทยบนแผ่นเอง** (เช่น "แปลนฐานราก", "แบบขยายคาน") แทนการเดา
+    จากเลขแผ่น (S-05, S-09 ฯลฯ) -- เลขแผ่นเป็นธรรมเนียมเฉพาะสำนักงานออกแบบแต่ละที่ ไม่สื่อความหมาย
+    เดียวกันข้ามโปรเจกต์เลย (ยืนยันจริง: โปรเจกต์หนึ่ง S-05=ผังตำแหน่ง แต่อีกโปรเจกต์ S-05=ตารางสเปค)
+    -- required_keywords คือ list ของคำที่ต้องเจอ**ทุกคำ**ในหน้าเดียวกัน (AND ไม่ใช่ OR) คืนเลขหน้า
+    (0-indexed) ของหน้าแรกที่ตรง หรือ None ถ้าไม่เจอเลย ค้นจากหน้า start เป็นต้นไป
+
+    require_grid=True: ปฏิเสธหน้าที่ตรงคำค้นแต่ไม่มีเส้นกริด (A-E/1-8) จริง -- กันกรณีหน้าสารบัญ/
+    legend ที่แค่ "พูดถึง" ชื่อแผ่นในตาราง ไม่ใช่ตัวแผ่นจริง (พบจริง: หน้าสารบัญ A-01 มีคำว่า
+    "แปลนฐานราก" อยู่ในรายการสารบัญ ทำให้ match ผิดหน้าถ้าไม่เช็คกริด)"""
+    for pno in range(start, len(doc)):
+        spans = extract_fixed_spans(doc[pno])
+        joined = " ".join(s["text"] for s in spans)
+        if not all(kw in joined for kw in required_keywords):
+            continue
+        if require_grid:
+            columns, rows = extract_grid(spans)
+            if len(columns) < 2 or len(rows) < 2:
+                continue
+        return pno
+    return None
+
+
+def find_page_with_most_markers(doc, marker_re, min_count=3):
+    """หาแผ่นที่มีป้ายตรงกับ marker_re (เช่น รหัสตอม่อ Cx) **มากที่สุด** ในทั้งเอกสาร ไม่ใช่แค่แผ่น
+    แรกที่เจอ >= min_count -- ใช้เป็น fallback สุดท้ายเมื่อหาหัวข้อภาษาไทยไม่เจอ (เช่นเพราะฟอนต์
+    หัวข้อเพี้ยนคนละแบบกับฟอนต์เนื้อหา ยังไม่รองรับใน thai_font_fix.py) แผ่นจริง (ผังตำแหน่ง) จะมี
+    ป้ายซ้ำเป็นสิบๆ จุด ต่างจากแผ่นอื่นที่อาจมีคำบังเอิญตรงแค่ 3-4 จุด (เช่น ชื่อวิศวกรในกรอบข้อมูล
+    แบบ) -- คืน None ถ้าไม่มีแผ่นไหนถึง min_count เลย"""
+    best_pno, best_count = None, 0
+    for pno in range(len(doc)):
+        spans = extract_fixed_spans(doc[pno])
+        count = sum(1 for s in spans if marker_re.match(s["text"].strip()))
+        if count > best_count:
+            best_pno, best_count = pno, count
+    return best_pno if best_count >= min_count else None
+
+
 def find_drawing_page_by_title_block(doc, drawing_no, bottom_fraction=0.88):
     """หาหน้าที่มีป้าย "DRAWING NO." ตรงกับ drawing_no เป๊ะๆ โดยดูเฉพาะข้อความที่อยู่ค่อนไปทางล่างสุด
     ของหน้า (title block) เท่านั้น -- แม่นกว่า find_drawing_page เดิมเพราะไม่ต้องพึ่ง marker ของแต่ละ
@@ -59,7 +97,7 @@ def find_drawing_page(doc, drawing_no, min_marker_count=3, marker_re=None):
         return pno
 
     if marker_re is None:
-        marker_re = re.compile(r"^C[0-9A-Za-z]+$")
+        marker_re = re.compile(r"^C[0-9]+[A-Za-z]?$")
     target = drawing_no.upper()
     for pno in range(len(doc)):
         page = doc[pno]

@@ -18,7 +18,7 @@
    อัตโนมัติเสมอ ไม่หยุดรอผู้ใช้ (ตามกฎที่ตัดสินใจไว้) แต่ติด status="estimated" ชัดเจน
 
 Usage:
-    python extract_pier_column_boq.py <pdf_path> [--drawing-no S-05]
+    python extract_pier_column_boq.py <pdf_path>
 """
 import argparse
 import json
@@ -28,14 +28,28 @@ import sys
 import fitz
 
 import grid_utils
-from extract_footing_boq import extract_pier_footing_pairs
+from extract_footing_boq import extract_pier_footing_pairs, PIER_OR_COMBINED_RE
 from thai_font_fix import extract_fixed_spans
 
-PIER_CODE_RE = re.compile(r"^C[0-9A-Za-z]+$")
-SIZE_MM_RE = re.compile(r"^(\d+)\s*[xX]\s*(\d+)\s*mm\.?$")
+PIER_CODE_RE = re.compile(r"^C[0-9]+[A-Za-z]?$")
+FOOTING_PLAN_TITLE_KEYWORDS = ["แปลนฐานราก"]
+# หน่วย/รูปแบบตารางสเปคเสาต่างกันได้มากระหว่างสำนักงานออกแบบ (ยืนยันจริง: โปรเจกต์หนึ่งเขียน
+# "200 x 400mm." เป็นมิลลิเมตรไม่มีวงเล็บ, อีกโปรเจกต์เขียน "(0.20 x 0.20)" เป็นเมตรมีวงเล็บ --
+# regex ด้านล่างรองรับทั้งคู่ แล้วตัดสินหน่วยจากขนาดตัวเลข ไม่ใช่จากข้อความ (>10 = มม., <=10 = ม.)
+SIZE_RE = re.compile(r"^\(?(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)\s*(?:mm\.?|m\.?)?\)?$")
 REBAR_COUNT_RE = re.compile(r"^(\d+)-DB\s*(\d+)\s*mm\.?$", re.IGNORECASE)
-STIRRUP_RE = re.compile(r"^1-RB\s*(\d+)\s*mm\.?\s*@\s*([\d.]+)\s*mm\.?$", re.IGNORECASE)
+# ตัวอักษรนำหน้า "-RB" ต่างกันได้ (116-69: "1-RB6mm.@150mm.", อีกโปรเจกต์: "ป-RB6mm.@0.15m." --
+# "ป" คือสัญลักษณ์ปลอกของสำนักงานนั้น ไม่ใช่ตัวเลข) ใช้ `.` จับตัวอักษรนำหน้าแบบไม่สนใจค่า เพราะ
+# ไม่ได้ใช้ค่านี้ต่ออยู่แล้ว (ปลอก 1 เส้นต่อจุดเสมอ) หน่วยระยะห่างก็รองรับทั้ง มม./ม. เหมือนกัน
+STIRRUP_RE = re.compile(r"^.-RB\s*(\d+)\s*mm\.?\s*@\s*([\d.]+)\s*(mm\.?|m\.?)?$", re.IGNORECASE)
 EXCAVATION_DEPTH_RE = re.compile(r"ความลึกของฐานรากเท่ากับ\s*([\d.]+)\s*เมตร")
+
+
+def _to_meters(value):
+    """ตัดสินว่าตัวเลขที่อ่านมาเป็นมิลลิเมตรหรือเมตร จากขนาดตัวเลขเอง (ไม่ใช่จากหน่วยที่เขียนกำกับ
+    เพราะบางไฟล์ไม่เขียนหน่วยชัดเจน) -- หน้าตัดเสา/ระยะห่างปลอกจริงไม่มีทางเกิน 10 เมตร แต่ถ้าเป็น
+    มิลลิเมตรมักเกิน 10 เสมอ (เช่น 200mm, 150mm) ใช้ 10 เป็นเกณฑ์แบ่ง"""
+    return value / 1000.0 if value > 10 else value
 
 SAND_LAYER_M = 0.10       # ค่าฟิสิกส์ทั่วไป (ทรายรองพื้นฐานราก) ใช้ร่วมได้ทุกโปรเจกต์
 LEAN_CONCRETE_M = 0.05    # ค่าฟิสิกส์ทั่วไป (คอนกรีตหยาบ)
@@ -43,33 +57,35 @@ DEFAULT_FLOOR_LEVEL_M = 1.00  # ค่าเผื่อทั่วไปถ้
 
 
 def find_column_schedule(doc):
-    """หาหน้าที่มีตารางสเปคเสา (มีคำว่า MAIN REBAR + STIRRUP + SIZE ปรากฏ) แล้วดึงสเปคหน้าตัด/
-    เหล็กยืน/ปลอกออกมาโดยไล่ตามลำดับตัวเลขที่ตามหลัง "SIZE"/"MAIN REBAR"/"STIRRUP" -- คืน dict
-    เดียว (สมมติทั้งไฟล์มีสเปคเสาแบบเดียว ตรงกับ 116-69 ที่มีแค่ C1) พร้อม page ที่เจอ."""
+    """หาหน้าที่มีตารางสเปคเสา (มีคำว่า "rebar" + "stirrup" ปรากฏ, ไม่สนตัวพิมพ์ใหญ่-เล็ก/จุดต่อท้าย
+    เพราะแต่ละไฟล์เขียนไม่เหมือนกัน เช่น "MAIN REBAR" กับ "Main Rebar.") แล้วดึงสเปคหน้าตัด/เหล็กยืน/
+    ปลอกออกมาโดยไล่ตามลำดับข้อความที่ตรงรูปแบบขนาด/เหล็ก -- คืน dict เดียว (สมมติทั้งไฟล์มีสเปคเสา
+    แบบเดียว ตรงกับทุกโปรเจกต์ที่ทดสอบมาจนถึงตอนนี้) พร้อม page ที่เจอ."""
     for pno in range(len(doc)):
         spans = extract_fixed_spans(doc[pno])
         texts = [s["text"].strip() for s in spans]
-        if "MAIN REBAR" not in texts or "STIRRUP" not in texts:
+        lowered = [t.lower() for t in texts]
+        if not any("rebar" in t for t in lowered) or not any("stirrup" in t for t in lowered):
             continue
 
-        size_mm = None
+        size_m = None
         main_rebar = None
         stirrup = None
         for t in texts:
-            m = SIZE_MM_RE.match(t)
-            if m and size_mm is None:
-                size_mm = (int(m.group(1)), int(m.group(2)))
+            m = SIZE_RE.match(t)
+            if m and size_m is None:
+                size_m = (_to_meters(float(m.group(1))), _to_meters(float(m.group(2))))
             m = REBAR_COUNT_RE.match(t)
             if m and main_rebar is None:
                 main_rebar = f"{m.group(1)}-DB{m.group(2)}"
             m = STIRRUP_RE.match(t)
             if m and stirrup is None:
-                stirrup = f"1-RB{m.group(1)}@{float(m.group(2)) / 1000:.3f}m"
+                stirrup = f"1-RB{m.group(1)}@{_to_meters(float(m.group(2))):.3f}m"
 
-        if size_mm or main_rebar or stirrup:
+        if size_m or main_rebar or stirrup:
             return {
                 "page": pno + 1,
-                "size_m": [size_mm[0] / 1000, size_mm[1] / 1000] if size_mm else None,
+                "size_m": [round(size_m[0], 3), round(size_m[1], 3)] if size_m else None,
                 "main_rebar": main_rebar,
                 "stirrup": stirrup,
                 "source": "text_table",
@@ -127,11 +143,19 @@ def find_excavation_depth(doc):
     return None
 
 
-def extract_pier_column_takeoff(pdf_path, drawing_no="S-05"):
+def extract_pier_column_takeoff(pdf_path, drawing_no=None):
+    """drawing_no: ระบุเลขแผ่นเองได้ (override) ปกติไม่ต้องใส่ -- ค้นจากหัวข้อ "แปลนฐานราก" อัตโนมัติ
+    ก่อนเสมอ (ตำแหน่งตอม่อ/เสาอยู่บนแผ่นเดียวกับฐานราก) ค่อย fallback ไปนับป้ายรหัสตอม่อถ้าหาไม่เจอ"""
     doc = fitz.open(pdf_path)
-    pno = grid_utils.find_drawing_page(doc, drawing_no, marker_re=PIER_CODE_RE)
+    if drawing_no:
+        pno = grid_utils.find_drawing_page(doc, drawing_no, marker_re=PIER_CODE_RE)
+    else:
+        pno = grid_utils.find_page_by_content(doc, FOOTING_PLAN_TITLE_KEYWORDS, require_grid=True)
+        if pno is None:
+            pno = grid_utils.find_page_with_most_markers(doc, PIER_OR_COMBINED_RE, min_count=3)
     if pno is None:
-        return {"status": "not_found", "notes": [f"ไม่พบหน้าแบบ {drawing_no}"], "items": [], "totals": {}}
+        return {"status": "not_found", "notes": ["ไม่พบแผ่น 'แปลนฐานราก' และไม่พบแผ่นที่มีป้ายรหัสตอม่อหนาแน่นพอ"],
+                "items": [], "totals": {}}
 
     page = doc[pno]
     spans = extract_fixed_spans(page)
@@ -195,7 +219,7 @@ def extract_pier_column_takeoff(pdf_path, drawing_no="S-05"):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("pdf_path")
-    ap.add_argument("--drawing-no", default="S-05")
+    ap.add_argument("--drawing-no", default=None, help="ระบุเลขแผ่นเอง (override) ปกติไม่ต้องใส่")
     args = ap.parse_args()
     result = extract_pier_column_takeoff(args.pdf_path, drawing_no=args.drawing_no)
     print(json.dumps(result, ensure_ascii=False, indent=2))

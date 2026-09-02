@@ -1,0 +1,109 @@
+{
+  "pdftoboq_version": "phase-c-2569-09-02",
+  "generated_at": "2026-09-02T21:20:21.567650",
+  "pdf_path": "D:\\webapp\\pdftoboq\\project\\แบบบ้านสันคือ\\PDF\\แบบบ้านสันคือ.pdf",
+  "page_count": 28,
+  "categories": {
+    "footing": {
+      "status": "positions_and_sizes_confirmed",
+      "drawing_page": 22,
+      "scale_denominator": 25.0,
+      "notes": [
+        "ข้าม AI vision fallback: ไม่พบหน้าแบบ S-09",
+        "ยังไม่มีความหนา (T) และเหล็กเสริมสำหรับบางรายการ -- ตารางสเปคฐานรากมักถูก flatten เป็น vector อ่านด้วย text ไม่ได้ และ AI vision fallback อ่านไม่สำเร็จ/ไม่ได้เปิดใช้"
+      ],
+      "items": [
+        {
+          "code": "F1",
+          "count": 1,
+          "size_m": [
+            0.02,
+            0.02
+          ],
+          "thickness_m": null,
+          "rebar": null,
+          "concrete_m3_each": null,
+          "concrete_m3_total": null,
+          "source": "vector_geometry",
+          "status": "needs_vision_for_spec",
+          "area_m2_each": 0.0004
+        }
+      ],
+      "positions": [
+        {
+          "grid": "T1",
+          "pier_code": "CB",
+          "footing_code": "F1",
+          "size_m": [
+            0.02,
+            0.02
+          ]
+        }
+      ],
+      "total_count": 1,
+      "summary": {
+        "concrete_m3_net": null,
+        "concrete_m3_with_waste": null,
+        "rebar_kg_net": null,
+        "rebar_kg_with_waste": null,
+        "status": "blocked_needs_thickness_spec",
+        "note": null
+      }
+    },
+    "pier_column": {
+      "status": "partial",
+      "drawing_page": 22,
+      "schedule_page": null,
+      "height_source_page": 5,
+      "excavation_note_page": null,
+      "notes": [
+        "ไม่พบตารางสเปคเสา (SIZE/MAIN REBAR/STIRRUP) เป็น text -- อาจถูก flatten เป็น vector รอ Phase B (AI vision)",
+        "ไม่พบข้อความ \"ความลึกของฐานรากเท่ากับ...เมตร\" -- คำนวณความสูงตอม่อไม่ได้"
+      ],
+      "items": [
+        {
+          "code": "CB",
+          "count": 1,
+          "cross_section_m": null,
+          "main_rebar": null,
+          "stirrup": null,
+          "pier_height_m": null,
+          "pier_height_status": "not_computed",
+          "column_height_m": 1.0,
+          "column_height_status": "estimated_from_drawing"
+        }
+      ],
+      "total_count": 1,
+      "summary": {
+        "status": "blocked_missing_data"
+      }
+    },
+    "beam": {
+      "status": "spec_not_found",
+      "notes": [
+        "ไม่พบตารางขยายคาน (ต้องมี TOP BAR + STIRRUP)"
+      ],
+      "items": [],
+      "summary": {
+        "status": "spec_not_found"
+      }
+    },
+    "floor": {
+      "status": "not_implemented",
+      "notes": [
+        "ลองแล้ว (2569-09-02): จับคู่ป้าย S1/PS บนแผ่นคาน-พื้น (S-06) เข้ากับ 'ช่องกริดโครงสร้าง' ที่ใกล้ที่สุด แล้วคำนวณพื้นที่จากขนาดช่องกริด -- ผลออกมาคลาดเคลื่อนมาก (S1 ได้ 19.25 ตร.ม. เทียบกับพื้นที่จริงที่วัดจากขอบเขตห้องบนแบบสถาปัตย์ 14.34 ตร.ม. คลาดเคลื่อน +34%) เพราะห้องน้ำ/ห้องเล็กไม่ได้มีขอบเขตตรงกับช่องกริดโครงสร้าง (เป็นผนังภายในที่ไม่ ปรากฏในแบบคาน) -- ไม่ปล่อยตัวเลขที่รู้อยู่แล้วว่าคลาดเคลื่อนสูง ต้องอ่านขอบเขตห้องจริง จากแบบสถาปัตย์ (A-05 หรือเทียบเท่า) ด้วย AI vision ก่อน ยังไม่ได้ทำ (รอ Phase C ต่อ)"
+      ]
+    },
+    "roof": {
+      "status": "not_found",
+      "notes": [
+        "ไม่พบตาราง 'ถอดปริมาณงานโครงสร้างคานเหล็กหลังคา' ในแผ่น S-07/S-08 -- อาจไม่มีตารางนี้ ในโปรเจกต์นี้ (ผู้ออกแบบบางรายไม่สรุปให้) ต้องนับเส้นจากแบบเอง (ยังไม่รองรับ)"
+      ],
+      "items": [],
+      "non_structural_rows": [],
+      "summary": {
+        "status": "not_found"
+      }
+    }
+  }
+}
