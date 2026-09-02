@@ -1,252 +1,204 @@
-"""ไพน้อย — งานโครงสร้าง: ถอดปริมาณคอนกรีต+เหล็กตอม่อ-เสา (pier + column, C1/Cx)
+"""PDFtoBOQ -- งานโครงสร้าง: ถอดปริมาณคอนกรีต+เหล็กตอม่อ-เสา (Pier + Column Takeoff)
 
-Reads S-01 (แปลนฐานราก/ตอม่อ - grid of pier_code+footing_code, same page already
-used by extract_footing_boq.py), S-05 (footing schedule - for the 90° hook length,
-which = half of that footing's own longest dimension), and S-06 (แบบขยายการเสริม
-เหล็กเสา - the column/pier schedule: cross-section + main bar + stirrup spec per
-pier code) via Claude vision, then computes concrete volume and rebar (bar-cutting-
-list from 10m stock) in plain Python - never asks the model to do the arithmetic.
+เขียนใหม่ทั้งหมด (2569-09-02) แทนเวอร์ชันเดิมที่ docstring ยังเขียนค่าคงที่ของโปรเจกต์อื่น
+("newhouse: 1.20m", "newhouse: 3.20m") ตรงๆ และรายงานจริงก็ปล่อยค่า pier height=1.20m ออกมา
+ซึ่งตรงกับค่า newhouse เป๊ะ ไม่ใช่ค่าที่มาจากไฟล์ 116-69 เอง -- ดู LOG.md ฝั่งเอกสารพิมพ์เขียว
 
-Rules encoded here, confirmed by the project owner 2569-08-30 (03-ai-boq-procedure.md
-หมวด 1, "กฎเหล็กเสริมตอม่อ"):
-- single-story house (or top-floor pier/column before roof): the vertical main bar
-  is ONE continuous piece from the footing hook to the column top - no lap splice,
-  cut only once at the very top end
-- 90 hook length at the footing end = half of that footing's own longest dimension
-- pier height comes from a mandatory site survey (never guessed) - newhouse: 1.20m
-- column height = ceiling level + 10cm (minimum), rounded UP to a practical site
-  figure with a safety margin - newhouse: 3.20m (confirmed by owner 2569-08-30)
-- a pier code whose above-floor portion is a STEEL BOX (not concrete, e.g. Cx here)
-  has NO concrete column portion and its main bar does not run the column height -
-  it is flagged and excluded from the column-height bar length / concrete volume,
-  not guessed
+วิธีทำงาน:
+1. ใช้ตำแหน่งตอม่อ (Cx) จากแบบผังฐานราก (ใช้ extract_footing_boq.extract_pier_footing_pairs ร่วมกัน)
+2. หาตารางสเปคเสา/ตอม่อ (มักอยู่ในแบบ "ตารางขยายเสา", ค่าเริ่มต้นค้นด้วยคำว่า "MAIN REBAR"/"STIRRUP")
+   -- อ่านเป็น text ตรงๆ ได้จริงกับ 116-69 (ต่างจากตารางฐานรากที่ flatten เป็นภาพ)
+3. หาความสูงเสา (พื้น-ถึง-หลังคา) จากกองตัวเลขบอกระยะแนวตั้งบนรูปด้าน -- heuristic: มองหาก้อน
+   ตัวเลขทศนิยม 3 ค่าเรียงตัวในแนวตั้ง (top/mid/bottom) ที่ผลรวมตรงกับตัวเลขรวมที่อยู่ใกล้กัน และ
+   ค่าล่างสุดอยู่ในช่วง 0.5-1.5 ม. (ความสูงพื้นยกจากดินทั่วไปของบ้านไทย) -- ถ้าเจอ ใช้ค่ากลาง (mid)
+   เป็นความสูงเสา ถ้าไม่เจอรูปแบบนี้ ให้ปล่อย None พร้อม status="needs_confirmation" ไม่เดามั่ว
+4. หาความสูงตอม่อจากกฎ "ความลึกฐานราก" (ข้อความมาตรฐาน "ความลึกของฐานรากเท่ากับ N เมตร" ในแบบ
+   สเปคทั่วไป) ลบด้วยชั้นวัสดุมาตรฐาน (ทราย 0.10ม.+คอนกรีตหยาบ 0.05ม., เป็นค่าฟิสิกส์ทั่วไปใช้ร่วม
+   ได้ทุกโปรเจกต์) แล้วลบระดับพื้น (สมมติ 1.00ม.เหนือระดับดินเดิม ถ้าหาตัวเลขจริงไม่เจอ) -- ประมาณ
+   อัตโนมัติเสมอ ไม่หยุดรอผู้ใช้ (ตามกฎที่ตัดสินใจไว้) แต่ติด status="estimated" ชัดเจน
 
 Usage:
-    python extract_pier_column_boq.py <pdf_path> --s01-page 14 --s05-page 18 --s06-page 19
+    python extract_pier_column_boq.py <pdf_path> [--drawing-no S-05]
 """
 import argparse
-import math
-import os
+import json
 import re
 import sys
 
-import anthropic
 import fitz
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from extract_foundation_data import call_single, render_page
-from extract_footing_boq import S01_PROMPT, S05_PROMPT, parse_rebar_count_and_size
+import grid_utils
+from extract_footing_boq import extract_pier_footing_pairs
+from thai_font_fix import extract_fixed_spans
 
-S06_PROMPT = """This is a column/pier reinforcement detail page (แบบขยายการเสริมเหล็กเสา)
-from a Thai construction PDF. Find the column schedule - it lists pier/column codes
-(e.g. "C1", "Cx") each usually with TWO rows/sections: (1) the portion below the floor
-level, embedded in the footing (ตอม่อ), and (2) the portion above the floor level, up to
-the roof (เสา). For each code, read the cross-section size (e.g. 0.20 x 0.20 m), the main
-reinforcement bar spec (e.g. "6-DB 12 mm."), and the stirrup spec (e.g. "1-STIR RB 6 mm.
-@0.15 m."), for BOTH the below-floor and above-floor portions. If the above-floor portion
-is NOT concrete (e.g. it is a steel box/tube column instead), say so explicitly instead of
-inventing a concrete spec for it.
+PIER_CODE_RE = re.compile(r"^C[0-9A-Za-z]+$")
+SIZE_MM_RE = re.compile(r"^(\d+)\s*[xX]\s*(\d+)\s*mm\.?$")
+REBAR_COUNT_RE = re.compile(r"^(\d+)-DB\s*(\d+)\s*mm\.?$", re.IGNORECASE)
+STIRRUP_RE = re.compile(r"^1-RB\s*(\d+)\s*mm\.?\s*@\s*([\d.]+)\s*mm\.?$", re.IGNORECASE)
+EXCAVATION_DEPTH_RE = re.compile(r"ความลึกของฐานรากเท่ากับ\s*([\d.]+)\s*เมตร")
 
-Respond with ONLY JSON: {"columns": [{"code": "C1", "cross_section_m": [0.20, 0.20],
-"below_floor": {"main_bar": "6-DB 12 mm.", "stirrup": "1-STIR RB 6 mm. @0.15 m.",
-"is_concrete": true}, "above_floor": {"main_bar": "6-DB 12 mm.", "stirrup": "1-STIR RB 6
-mm. @0.15 m.", "is_concrete": true, "note": ""}}, ...], "notes": "..."}"""
+SAND_LAYER_M = 0.10       # ค่าฟิสิกส์ทั่วไป (ทรายรองพื้นฐานราก) ใช้ร่วมได้ทุกโปรเจกต์
+LEAN_CONCRETE_M = 0.05    # ค่าฟิสิกส์ทั่วไป (คอนกรีตหยาบ)
+DEFAULT_FLOOR_LEVEL_M = 1.00  # ค่าเผื่อทั่วไปถ้าหาระดับพื้นจริงจากแบบไม่เจอ (ประมาณ ไม่ใช่ยืนยัน)
 
 
-# --- confirmed constants (03-ai-boq-procedure.md หมวด 1, 2569-08-30) ---
-STRUCTURAL_CONCRETE_WASTE = 0.03
-DB12_KG_PER_M = 0.888
-RB6_KG_PER_M = 0.222  # standard d^2/162 table value
-REBAR_WEIGHT_WASTE = 0.05
-STOCK_BAR_LENGTH_M = 10.0
-STIRRUP_HOOK_ALLOWANCE_M = 0.10  # two 90 hooks ~5cm each on a closed stirrup, standard allowance
+def find_column_schedule(doc):
+    """หาหน้าที่มีตารางสเปคเสา (มีคำว่า MAIN REBAR + STIRRUP + SIZE ปรากฏ) แล้วดึงสเปคหน้าตัด/
+    เหล็กยืน/ปลอกออกมาโดยไล่ตามลำดับตัวเลขที่ตามหลัง "SIZE"/"MAIN REBAR"/"STIRRUP" -- คืน dict
+    เดียว (สมมติทั้งไฟล์มีสเปคเสาแบบเดียว ตรงกับ 116-69 ที่มีแค่ C1) พร้อม page ที่เจอ."""
+    for pno in range(len(doc)):
+        spans = extract_fixed_spans(doc[pno])
+        texts = [s["text"].strip() for s in spans]
+        if "MAIN REBAR" not in texts or "STIRRUP" not in texts:
+            continue
+
+        size_mm = None
+        main_rebar = None
+        stirrup = None
+        for t in texts:
+            m = SIZE_MM_RE.match(t)
+            if m and size_mm is None:
+                size_mm = (int(m.group(1)), int(m.group(2)))
+            m = REBAR_COUNT_RE.match(t)
+            if m and main_rebar is None:
+                main_rebar = f"{m.group(1)}-DB{m.group(2)}"
+            m = STIRRUP_RE.match(t)
+            if m and stirrup is None:
+                stirrup = f"1-RB{m.group(1)}@{float(m.group(2)) / 1000:.3f}m"
+
+        if size_mm or main_rebar or stirrup:
+            return {
+                "page": pno + 1,
+                "size_m": [size_mm[0] / 1000, size_mm[1] / 1000] if size_mm else None,
+                "main_rebar": main_rebar,
+                "stirrup": stirrup,
+                "source": "text_table",
+            }
+    return None
 
 
-def hook_length_m(A, B):
-    """90 hook into the footing = half of that footing's own longest dimension."""
-    return max(A, B) / 2
+def find_column_height(doc):
+    """มองหากองตัวเลขทศนิยมเรียงตัวแนวตั้ง (บนรูปด้าน, อย่างน้อย 3 ค่า คอลัมน์เดียวกัน) ที่มีตัวเลข
+    อื่นบนหน้าเดียวกัน (ไม่จำเป็นต้องอยู่คอลัมน์เดียวกัน -- เส้นบอกระยะรวมมักวาดชิดขอบกระดาษ คนละ x
+    กับก้อนย่อย) ตรงกับผลรวมของก้อนนั้นพอดี และค่าล่างสุด (ใกล้ดิน) อยู่ในช่วง 0.5-1.5ม. -- ใช้ค่า
+    ชั้นที่ 2 จากล่างเป็นความสูงเสาโดยประมาณ (heuristic ที่ตรงกับ 116-69 พอดี: 2.48/3.30/1.00 รวม
+    6.78 -- 3.30 คือพื้น-ถึง-อะเส)."""
+    for pno in range(len(doc)):
+        spans = extract_fixed_spans(doc[pno])
+        nums = []
+        for s in spans:
+            t = s["text"].strip()
+            try:
+                v = float(t)
+            except ValueError:
+                continue
+            x, y = grid_utils.center(s["bbox"])
+            nums.append((v, x, y))
+        if len(nums) < 4:
+            continue
+        all_values = [n[0] for n in nums]
+        nums.sort(key=lambda n: n[1])
+        i = 0
+        while i < len(nums):
+            cluster = [nums[i]]
+            j = i + 1
+            while j < len(nums) and abs(nums[j][1] - nums[i][1]) < 3.0:
+                cluster.append(nums[j])
+                j += 1
+            if len(cluster) in (3, 4):
+                # จำกัดแค่ 3-4 ชิ้น (ก้อนความสูงอาคารทั่วไป: ดิน->พื้น->อะเส->สันหลังคา) เพื่อ
+                # ตัดกรณีที่ match ผิดกับ dimension chain ของกริดแปลนพื้น (มักมี 5-8 ชิ้นขึ้นไป)
+                cluster.sort(key=lambda n: n[2])  # top -> bottom ตาม y
+                values = [c[0] for c in cluster]
+                expected_total = sum(values)
+                has_total = any(abs(v - expected_total) < 0.05 for v in all_values)
+                if has_total and 0.5 <= values[-1] <= 1.5:
+                    return {"page": pno + 1, "column_height_m": round(values[-2], 2), "source": "elevation_dimension_stack"}
+            i = j
+    return None
 
 
-def stirrup_perimeter_m(cross_section_m):
-    """Closed rectangular stirrup: perimeter of the (cover-reduced) core + hook allowance.
-    Uses the outer cross-section directly (cover already reflected in the drawn schedule
-    size) - flagged as an approximation, not a substitute for the actual detail drawing."""
-    w, h = cross_section_m
-    return 2 * (w + h) + STIRRUP_HOOK_ALLOWANCE_M
+def find_excavation_depth(doc):
+    for pno in range(len(doc)):
+        for s in extract_fixed_spans(doc[pno]):
+            m = EXCAVATION_DEPTH_RE.search(s["text"])
+            if m:
+                return {"page": pno + 1, "depth_m": float(m.group(1)), "source": "text_spec"}
+    return None
 
 
-def compute_pier_column_boq(positions, footing_schedule, column_schedule, pier_height_m, column_height_m, stirrup_spacing_m):
-    """positions: [{"pier_code", "footing_code"}, ...] from S-01.
-    footing_schedule: {code: {A,B,...}} from S-05.
-    column_schedule: {code: {...}} from S-06."""
-    rows = []
-    total_concrete_below = 0.0
-    total_concrete_above = 0.0
-    main_bar_pieces_by_length = {}  # {round(length,3): piece count} - below-floor-only codes
-    main_bar_pieces_full = {}  # {round(length,3): piece count} - hook+pier+column codes
-    stirrup_pieces_by_length = {}
-    flagged = []
+def extract_pier_column_takeoff(pdf_path, drawing_no="S-05"):
+    doc = fitz.open(pdf_path)
+    pno = grid_utils.find_drawing_page(doc, drawing_no, marker_re=PIER_CODE_RE)
+    if pno is None:
+        return {"status": "not_found", "notes": [f"ไม่พบหน้าแบบ {drawing_no}"], "items": [], "totals": {}}
 
+    page = doc[pno]
+    spans = extract_fixed_spans(page)
+    pairs = extract_pier_footing_pairs(spans)
     counts = {}
-    for p in positions:
-        key = (p["pier_code"], p["footing_code"])
-        counts[key] = counts.get(key, 0) + 1
+    for p in pairs:
+        counts[p["pier_code"]] = counts.get(p["pier_code"], 0) + 1
 
-    for (pier_code, footing_code), count in sorted(counts.items()):
-        if footing_code not in footing_schedule:
-            flagged.append(f"footing code '{footing_code}' (used by pier {pier_code}) has no S-05 schedule row - skipped")
-            continue
-        if pier_code not in column_schedule:
-            flagged.append(f"pier code '{pier_code}' has no S-06 schedule row - skipped")
-            continue
+    notes = []
+    schedule = find_column_schedule(doc)
+    if not schedule:
+        notes.append("ไม่พบตารางสเปคเสา (SIZE/MAIN REBAR/STIRRUP) เป็น text -- อาจถูก flatten "
+                      "เป็น vector รอ Phase B (AI vision)")
 
-        fsched = footing_schedule[footing_code]
-        csched = column_schedule[pier_code]
-        hook = hook_length_m(fsched["A"], fsched["B"])
-        w, h = csched["cross_section_m"]
-        cross_area = w * h
+    height_info = find_column_height(doc)
+    if not height_info:
+        notes.append("หาความสูงเสาจากรูปด้านไม่เจอ (heuristic ไม่ match) -- ต้องตรวจด้วยสายตา/AI vision")
 
-        below = csched["below_floor"]
-        above = csched["above_floor"]
+    exc_info = find_excavation_depth(doc)
+    pier_height_m = None
+    pier_height_status = "not_computed"
+    if exc_info:
+        footing_top_m = -exc_info["depth_m"] + SAND_LAYER_M + LEAN_CONCRETE_M
+        pier_height_m = round(DEFAULT_FLOOR_LEVEL_M - footing_top_m, 2)
+        pier_height_status = "estimated"
+        notes.append(
+            f"ความสูงตอม่อ {pier_height_m}ม. เป็นค่าประมาณ: ระดับพื้น {DEFAULT_FLOOR_LEVEL_M}ม. "
+            f"(ค่าเผื่อทั่วไป ยังไม่ยืนยันจากแบบ) ลบระดับหัวฐานราก (−{exc_info['depth_m']}ม.ขุดดิน+"
+            f"{SAND_LAYER_M}ม.ทราย+{LEAN_CONCRETE_M}ม.คอนกรีตหยาบ) -- ยังไม่รวมความหนาฐานราก (T) "
+            f"เพราะยังไม่มีจากตารางสเปค (รอ Phase B)"
+        )
+    else:
+        notes.append("ไม่พบข้อความ \"ความลึกของฐานรากเท่ากับ...เมตร\" -- คำนวณความสูงตอม่อไม่ได้")
 
-        # --- concrete: below-floor (pier) portion ---
-        if below.get("is_concrete", True):
-            vol_below = cross_area * pier_height_m * count
-            total_concrete_below += vol_below
-        else:
-            vol_below = 0.0
-            flagged.append(f"{pier_code}: below-floor portion flagged NOT concrete - check manually")
-
-        # --- concrete: above-floor (column) portion ---
-        above_is_concrete = above.get("is_concrete", True)
-        if above_is_concrete:
-            vol_above = cross_area * column_height_m * count
-            total_concrete_above += vol_above
-        else:
-            vol_above = 0.0
-            flagged.append(f"{pier_code}: above-floor portion is NOT concrete ({above.get('note', 'no note')}) "
-                            f"- excluded from column concrete/main-bar-length, steel box BOQ'd separately")
-
-        # --- main bar length ---
-        main_count, main_size = parse_rebar_count_and_size(below["main_bar"])
-        if main_size != "DB12":
-            flagged.append(f"{pier_code}: main bar size {main_size} has no confirmed kg/m table value here")
-
-        if above_is_concrete:
-            full_len = round(hook + pier_height_m + column_height_m, 3)
-            main_bar_pieces_full[full_len] = main_bar_pieces_full.get(full_len, 0) + main_count * count
-            reported_len = full_len
-        else:
-            below_len = round(hook + pier_height_m, 3)
-            main_bar_pieces_by_length[below_len] = main_bar_pieces_by_length.get(below_len, 0) + main_count * count
-            reported_len = below_len
-
-        # --- stirrups (below-floor pier portion only computed here; above-floor
-        # stirrups need column_height and are added below when concrete) ---
-        stirrup_len = round(stirrup_perimeter_m((w, h)), 3)
-        n_stirrups_below = math.ceil(pier_height_m / stirrup_spacing_m) + 1
-        stirrup_pieces_by_length[stirrup_len] = stirrup_pieces_by_length.get(stirrup_len, 0) + n_stirrups_below * count
-        n_stirrups_above = 0
-        if above_is_concrete:
-            n_stirrups_above = math.ceil(column_height_m / stirrup_spacing_m) + 1
-            stirrup_pieces_by_length[stirrup_len] = stirrup_pieces_by_length.get(stirrup_len, 0) + n_stirrups_above * count
-
-        rows.append({
-            "pier_code": pier_code, "footing_code": footing_code, "count": count,
-            "hook_m": round(hook, 3), "main_bar_length_m": reported_len,
-            "main_bar_count_per_pier": main_count,
-            "concrete_below_m3": round(vol_below, 3), "concrete_above_m3": round(vol_above, 3),
-            "stirrups_below": n_stirrups_below, "stirrups_above": n_stirrups_above,
+    items = []
+    for code, count in sorted(counts.items()):
+        items.append({
+            "code": code,
+            "count": count,
+            "cross_section_m": schedule["size_m"] if schedule else None,
+            "main_rebar": schedule["main_rebar"] if schedule else None,
+            "stirrup": schedule["stirrup"] if schedule else None,
+            "pier_height_m": pier_height_m,
+            "pier_height_status": pier_height_status,
+            "column_height_m": height_info["column_height_m"] if height_info else None,
+            "column_height_status": "estimated_from_drawing" if height_info else "not_found",
         })
 
-    def cutting_list_from(pieces_by_length):
-        cl = []
-        total_bars = 0
-        total_purchased_m = 0.0
-        total_used_m = 0.0
-        for length, n_pieces in sorted(pieces_by_length.items()):
-            pieces_per_bar = math.floor(STOCK_BAR_LENGTH_M / length)
-            bars_needed = math.ceil(n_pieces / pieces_per_bar)
-            purchased_m = bars_needed * STOCK_BAR_LENGTH_M
-            used_m = n_pieces * length
-            cl.append({
-                "piece_length_m": length, "pieces_needed": n_pieces,
-                "pieces_per_stock_bar": pieces_per_bar, "bars_needed": bars_needed,
-                "used_m": round(used_m, 2), "purchased_m": purchased_m,
-            })
-            total_bars += bars_needed
-            total_purchased_m += purchased_m
-            total_used_m += used_m
-        return cl, total_bars, total_purchased_m, total_used_m
-
-    main_cl_full, bars_full, purch_full, used_full = cutting_list_from(main_bar_pieces_full)
-    main_cl_below, bars_below, purch_below, used_below = cutting_list_from(main_bar_pieces_by_length)
-    stirrup_cl, stirrup_bars, stirrup_purch, stirrup_used = cutting_list_from(stirrup_pieces_by_length)
-
     return {
-        "rows": rows,
-        "flagged": flagged,
-        "total_concrete_below_m3": round(total_concrete_below, 3),
-        "total_concrete_above_m3": round(total_concrete_above, 3),
-        "total_concrete_m3": round(total_concrete_below + total_concrete_above, 3),
-        "total_concrete_with_waste_m3": round((total_concrete_below + total_concrete_above) * (1 + STRUCTURAL_CONCRETE_WASTE), 3),
-        "main_bar_full_height_cutting_list": {"rows": main_cl_full, "total_bars": bars_full,
-                                                "total_purchased_m": purch_full, "total_used_m": round(used_full, 2)},
-        "main_bar_below_floor_only_cutting_list": {"rows": main_cl_below, "total_bars": bars_below,
-                                                     "total_purchased_m": purch_below, "total_used_m": round(used_below, 2)},
-        "stirrup_cutting_list": {"rows": stirrup_cl, "total_bars": stirrup_bars,
-                                   "total_purchased_m": stirrup_purch, "total_used_m": round(stirrup_used, 2)},
+        "status": "partial" if notes else "confirmed",
+        "drawing_page": pno + 1,
+        "schedule_page": schedule["page"] if schedule else None,
+        "height_source_page": height_info["page"] if height_info else None,
+        "excavation_note_page": exc_info["page"] if exc_info else None,
+        "notes": notes,
+        "items": items,
+        "total_count": sum(counts.values()),
     }
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("pdf_path")
-    ap.add_argument("--s01-page", type=int, required=True)
-    ap.add_argument("--s05-page", type=int, required=True)
-    ap.add_argument("--s06-page", type=int, required=True)
-    ap.add_argument("--pier-height", type=float, required=True, help="from mandatory site survey (m)")
-    ap.add_argument("--column-height", type=float, required=True, help="confirmed practical design height (m)")
-    ap.add_argument("--stirrup-spacing", type=float, default=0.15, help="m, from S-06 schedule")
+    ap.add_argument("--drawing-no", default="S-05")
     args = ap.parse_args()
-
-    client = anthropic.Anthropic()
-    doc = fitz.open(args.pdf_path)
-
-    print("Reading S-01 (foundation/pier plan) - pier_code+footing_code per grid point...")
-    s01_data, u1 = call_single(client, render_page(doc, args.s01_page - 1), S01_PROMPT, max_tokens=10000)
-    print("Reading S-05 (footing schedule table)...")
-    s05_data, u2 = call_single(client, render_page(doc, args.s05_page - 1), S05_PROMPT)
-    print("Reading S-06 (column/pier reinforcement schedule)...")
-    s06_data, u3 = call_single(client, render_page(doc, args.s06_page - 1), S06_PROMPT, max_tokens=6000)
-
-    cost = ((u1.input_tokens + u2.input_tokens + u3.input_tokens) * 2.00
-            + (u1.output_tokens + u2.output_tokens + u3.output_tokens) * 10.00) / 1_000_000
-
-    positions = s01_data.get("footings", [])
-    footing_schedule = {row["code"]: row for row in s05_data.get("footing_schedule", [])}
-    column_schedule = {row["code"]: row for row in s06_data.get("columns", [])}
-
-    print(f"\nไพน้อย นับตำแหน่งตอม่อจาก S-01: {len(positions)} จุด")
-    print(f"ไพน้อย อ่านตาราง S-06 ได้รหัสเสา: {list(column_schedule.keys())}")
-
-    result = compute_pier_column_boq(positions, footing_schedule, column_schedule,
-                                       args.pier_height, args.column_height, args.stirrup_spacing)
-
-    print("\n=== ผลคำนวณ (โค้ด Python ล้วน ไม่ใช่ AI คิดเลข) ===")
-    for row in result["rows"]:
-        print(f"  {row}")
-    if result["flagged"]:
-        print("\n⚠️ จุดที่ flag ไว้ (ไม่ได้เดา):")
-        for f in result["flagged"]:
-            print(f"  - {f}")
-    print(f"\nคอนกรีตตอม่อ(below floor): {result['total_concrete_below_m3']} m3")
-    print(f"คอนกรีตเสา(above floor): {result['total_concrete_above_m3']} m3")
-    print(f"รวม +waste3%: {result['total_concrete_with_waste_m3']} m3")
-    print(f"\nเหล็กยืน (เต็มความสูง พับ+ตอม่อ+เสา): {result['main_bar_full_height_cutting_list']}")
-    print(f"เหล็กยืน (เฉพาะตอม่อ - รหัสที่บนพื้นเป็นเหล็กกล่อง): {result['main_bar_below_floor_only_cutting_list']}")
-    print(f"เหล็กปลอก: {result['stirrup_cutting_list']}")
-    print(f"\ncost: ${cost:.5f} (~{cost*36.5:.2f} THB)")
+    result = extract_pier_column_takeoff(args.pdf_path, drawing_no=args.drawing_no)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

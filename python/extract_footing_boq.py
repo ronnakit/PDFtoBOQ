@@ -1,188 +1,171 @@
-"""Plan2BOQ — งานโครงสร้าง: ถอดปริมาณคอนกรีต+เหล็กฐานราก (Footing Takeoff Engine)
+"""PDFtoBOQ -- งานโครงสร้าง: ถอดปริมาณคอนกรีต+เหล็กฐานราก (Footing Takeoff)
 
-แก้ไขและปรับปรุงใหม่ (Benchmark กับ Revit BIM Ground Truth 100%):
-1. ใช้ระบบ Grid Coordinate Matrix (แกน A-E, 1-6) เพื่อระบุตำแหน่งฐานรากทีละจุดตัด ป้องกันการนับซ้ำ/นับหลอน
-2. ตัด Prompt Anchor Bias ออกทั้งหมด ไม่ใส่ตัวอย่างตัวเลขหลอกในคำสั่ง
-3. จับคู่ตรวจสอบ 1:1 กับตำแหน่งเสาตอม่อ (Footing-to-Column Cross-check)
-4. ผลลัพธ์ต้องตรงกับ Revit Schedule: F1=1 (0.60x0.60), F2=10 (1.20x1.20), F3=7 (1.40x1.40), รวม 18 ฐาน = 7.12 ลบ.ม.
+เขียนใหม่ทั้งหมด (2569-09-02) แทนเวอร์ชันเดิมที่มี CONFIRMED_GRID_MAPPING/CONFIRMED_FOOTING_SCHEDULE
+เป็นค่า hardcode ที่ไม่ตรงกับไฟล์จริง (grid mapping ใช้พิกัดที่ไม่มีอยู่จริงในแบบ 116-69, และค่าที่
+ปล่อยออกจากรายงานจริงก็ไม่ตรงกับค่าที่เขียนไว้ในไฟล์เองด้วยซ้ำ) -- ดู LOG.md ของฝั่งเอกสารพิมพ์เขียว
+วันที่ 2569-09-02 สำหรับรายละเอียดปัญหาเดิม
+
+วิธีทำงาน (โค้ดล้วน 100%, ไม่มีต้นทุน AI -- พิสูจน์แม่นกับ 116-69 แล้ว 3 ทาง: วัดเอง / ตาราง S-09
+จริง / Revit BIM schedule):
+1. หาแบบผังฐานราก (drawing_no ที่ระบุ, ค่าเริ่มต้น S-05) อัตโนมัติด้วย grid_utils.find_drawing_page
+2. หาเส้นกริด A-E/1-8 + อ่านสเกลจากหัวกระดาษ ด้วย grid_utils
+3. จับคู่รหัสตอม่อ (Cx) กับรหัสฐานราก (Fx) ที่ใกล้ที่สุด แปลงเป็นตำแหน่งกริด
+4. วัดขนาดจริงของแต่ละฐานรากจากรูปสี่เหลี่ยมทึบสี (vector fill) ที่วาดไว้บนแบบ
+
+**ข้อจำกัดที่ทราบอยู่แล้ว (Phase A, ยังไม่มี AI vision fallback):** ความหนา (T) และเหล็กเสริม
+มักอยู่ในตาราง "แบบขยายฐานราก" ที่หลายไฟล์ (ยืนยันแล้วกับ 116-69) ถูก flatten เป็นเส้น vector ล้วน
+อ่านด้วย page.get_text() ไม่ได้เลย -- ต้องรอ Phase B (AI vision fallback) ถึงจะอ่านตารางนี้ได้อัตโนมัติ
+ตอนนี้จะปล่อยเป็น None พร้อม status="needs_vision" ต่อรายการ ไม่เดาค่าขึ้นมาเอง
+
+Usage:
+    python extract_footing_boq.py <pdf_path> [--drawing-no S-05]
 """
-import os
-import sys
+import argparse
 import json
-import math
+import re
+import sys
 
-# --- ค่าคงที่มาตรฐานวิศวกรรม (Engineering Standards) ---
-LEAN_CONCRETE_THICKNESS_M = 0.075 # คอนกรีตหยาบ 7.5 ซม.
-LEAN_CONCRETE_AREA_FACTOR = 1.15  # เผื่อพื้นที่รอบฐานราก 15%
-STRUCTURAL_CONCRETE_WASTE = 0.03  # เผื่อสูญเสียคอนกรีตโครงสร้าง 3%
-COVER_IN_SOIL_M = 0.05            # ระยะหุ้มคอนกรีตในดิน 5 ซม.
-DB12_KG_PER_M = 0.888             # น้ำหนักเหล็ก DB12 (กก./ม.)
-STOCK_BAR_LENGTH_M = 10.0         # ความยาวเหล็กเส้นมาตรฐาน 10 ม.
+import fitz
 
-# ผังตำแหน่งพิกัด Grid Line ที่ถูกต้อง 100% จากแบบ S-01 และโมเดล BIM (18 จุด)
-CONFIRMED_GRID_MAPPING = {
-    # แถว A
-    "A1": {"footing_code": "F2", "pier_code": "C1"},
-    "A2": {"footing_code": "F2", "pier_code": "C1"},
-    "A3": {"footing_code": "F2", "pier_code": "C1"},
-    "A4": {"footing_code": "F3", "pier_code": "C1"},
-    "A5": {"footing_code": "F3", "pier_code": "C1"},
-    
-    # แถว B
-    "B1": {"footing_code": "F2", "pier_code": "C1"},
-    "B2": {"footing_code": "F2", "pier_code": "C1"},
-    "B3": {"footing_code": "F3", "pier_code": "C1"},
-    "B4": {"footing_code": "F3", "pier_code": "C1"},
-    
-    # แถว C
-    "C1": {"footing_code": "F2", "pier_code": "C1"},
-    "C2": {"footing_code": "F2", "pier_code": "C1"},
-    "C3": {"footing_code": "F3", "pier_code": "C1"},
-    "C4": {"footing_code": "F3", "pier_code": "C1"},
-    
-    # แถว D
-    "D1": {"footing_code": "F2", "pier_code": "C1"},
-    "D2": {"footing_code": "F2", "pier_code": "C1"},
-    "D3": {"footing_code": "F3", "pier_code": "C1"},
-    "D4": {"footing_code": "F2", "pier_code": "C1"},
-    
-    # แถว E (เสารับชายคา/เฉลียง)
-    "E1": {"footing_code": "F1", "pier_code": "Cx"}
-}
+import grid_utils
+from thai_font_fix import extract_fixed_spans
 
-# ตารางสเปกฐานรากจากแบบขยาย S-05 ที่สอบเทียบกับ Revit Ground Truth 100%
-CONFIRMED_FOOTING_SCHEDULE = {
-    "F1": {
-        "A": 0.60, # กว้าง (ม.)
-        "B": 0.60, # ยาว (ม.)
-        "T": 0.25, # หนา (ม.)
-        "reinforce_a": "4-DB12",
-        "reinforce_b": "4-DB12",
-        "pad_vol_unit": 0.090 # ลบ.ม./ฐาน
-    },
-    "F2": {
-        "A": 1.20,
-        "B": 1.20,
-        "T": 0.25,
-        "reinforce_a": "7-DB12",
-        "reinforce_b": "7-DB12",
-        "pad_vol_unit": 0.360
-    },
-    "F3": {
-        "A": 1.40,
-        "B": 1.40,
-        "T": 0.25,
-        "reinforce_a": "9-DB12",
-        "reinforce_b": "9-DB12",
-        "pad_vol_unit": 0.490
+PIER_CODE_RE = re.compile(r"^C[0-9A-Za-z]+$")
+FOOTING_CODE_RE = re.compile(r"^F[0-9]+$")
+
+STRUCTURAL_CONCRETE_WASTE = 0.03
+
+
+def extract_pier_footing_pairs(spans):
+    piers, footings = [], []
+    for s in spans:
+        text = s["text"].strip()
+        x, y = grid_utils.center(s["bbox"])
+        if PIER_CODE_RE.match(text):
+            piers.append((text, x, y))
+        elif FOOTING_CODE_RE.match(text):
+            footings.append((text, x, y))
+
+    pairs = []
+    used = set()
+    for pier_text, px, py in piers:
+        best_idx, best_dist = None, None
+        for idx, (f_text, fx, fy) in enumerate(footings):
+            if idx in used:
+                continue
+            dist = (fx - px) ** 2 + (fy - py) ** 2
+            if best_dist is None or dist < best_dist:
+                best_idx, best_dist = idx, dist
+        footing_text = None
+        if best_idx is not None:
+            used.add(best_idx)
+            footing_text = footings[best_idx][0]
+        pairs.append({"pier_code": pier_text, "footing_code": footing_text, "x": px, "y": py})
+    return pairs
+
+
+def extract_footing_takeoff(pdf_path, drawing_no="S-05", page_index=None):
+    doc = fitz.open(pdf_path)
+    if page_index is None:
+        pno = grid_utils.find_drawing_page(doc, drawing_no, marker_re=PIER_CODE_RE)
+        if pno is None:
+            return {
+                "status": "not_found",
+                "notes": [f"ไม่พบหน้าแบบ {drawing_no} ที่มีป้ายรหัสตอม่ออยู่จริง"],
+                "items": [], "positions": [], "totals": {},
+            }
+    else:
+        pno = page_index - 1
+
+    page = doc[pno]
+    spans = extract_fixed_spans(page)
+    columns, rowlabels = grid_utils.extract_grid(spans)
+    if not columns or not rowlabels:
+        return {
+            "status": "grid_not_found",
+            "notes": [f"หาป้ายกริดไม่ครบในหน้า {pno + 1} (columns={len(columns)}, rows={len(rowlabels)})"],
+            "items": [], "positions": [], "totals": {},
+        }
+
+    pairs = extract_pier_footing_pairs(spans)
+    for p in pairs:
+        p["grid"] = f"{grid_utils.nearest_label(p['x'], columns)}{grid_utils.nearest_label(p['y'], rowlabels)}"
+
+    scale_denom = grid_utils.find_scale_denominator(spans)
+    pts_per_m = grid_utils.points_per_meter(scale_denom) if scale_denom else None
+    filled_rects = grid_utils.filled_rects_on_page(page) if pts_per_m else []
+
+    notes = []
+    if pts_per_m is None:
+        notes.append("ไม่พบค่า SCALE ในหัวกระดาษ -- ข้ามการวัดขนาดจากรูปวาด")
+
+    for p in pairs:
+        if pts_per_m and filled_rects:
+            w, h = grid_utils.measure_rect_near_point(p["x"], p["y"], filled_rects, pts_per_m)
+            p["size_m"] = [round(w, 2), round(h, 2)] if w else None
+        else:
+            p["size_m"] = None
+
+    # จัดกลุ่มตามรหัสฐานราก -- ยึดขนาดที่พบบ่อยสุดต่อรหัสเป็นขนาดมาตรฐาน (เผื่อวัดคลาดเคลื่อนเล็กน้อย
+    # จุดใดจุดหนึ่ง) แล้วนับจำนวน
+    by_code = {}
+    for p in pairs:
+        code = p["footing_code"]
+        if not code:
+            continue
+        by_code.setdefault(code, []).append(p)
+
+    items = []
+    total_concrete_net = 0.0
+    for code, plist in sorted(by_code.items()):
+        sizes = [tuple(p["size_m"]) for p in plist if p["size_m"]]
+        size = max(set(sizes), key=sizes.count) if sizes else None
+        count = len(plist)
+        item = {
+            "code": code, "count": count,
+            "size_m": list(size) if size else None,
+            "thickness_m": None,  # ต้องใช้ Phase B (AI vision) อ่านตารางสเปคที่ flatten
+            "rebar": None,
+            "concrete_m3_each": None,
+            "concrete_m3_total": None,
+            "source": "vector_geometry" if size else "unmeasured",
+            "status": "needs_vision_for_spec",
+        }
+        if size:
+            area = size[0] * size[1]
+            item["area_m2_each"] = round(area, 4)
+        items.append(item)
+
+    unmatched = [p["pier_code"] for p in pairs if not p["footing_code"]]
+    if unmatched:
+        notes.append(f"จับคู่รหัสฐานรากไม่ได้ {len(unmatched)} จุด: {', '.join(unmatched)}")
+    if any(i["thickness_m"] is None for i in items):
+        notes.append("ยังไม่มีความหนา (T) และเหล็กเสริม -- ตารางสเปคฐานรากมักถูก flatten เป็น vector "
+                      "อ่านด้วย text ไม่ได้ ต้องรอ Phase B (AI vision fallback)")
+
+    return {
+        "status": "positions_and_sizes_confirmed" if items and all(i["size_m"] for i in items) else "partial",
+        "drawing_page": pno + 1,
+        "scale_denominator": scale_denom,
+        "notes": notes,
+        "items": items,
+        "positions": [
+            {"grid": p["grid"], "pier_code": p["pier_code"], "footing_code": p["footing_code"], "size_m": p["size_m"]}
+            for p in pairs
+        ],
+        "total_count": len(pairs),
     }
-}
 
-def calculate_footing_takeoff(grid_mapping=None, schedule=None):
-    """คำนวณปริมาณงานฐานรากตามระบบ Grid Matrix พร้อมตรวจสอบความแม่นยำเทียบ Revit"""
-    grid = grid_mapping or CONFIRMED_GRID_MAPPING
-    sched = schedule or CONFIRMED_FOOTING_SCHEDULE
-    
-    # 1. นับจำนวนฐานรากแต่ละรหัสจากพิกัด Grid
-    footing_counts = {}
-    grid_details = []
-    
-    for coord, data in grid.items():
-        f_code = data["footing_code"]
-        footing_counts[f_code] = footing_counts.get(f_code, 0) + 1
-        grid_details.append({
-            "grid": coord,
-            "footing_code": f_code,
-            "pier_code": data["pier_code"]
-        })
-        
-    total_count = sum(footing_counts.values())
-    
-    # 2. คำนวณปริมาตรคอนกรีตและเหล็กเสริม
-    rows = []
-    total_concrete_m3 = 0.0
-    total_lean_m3 = 0.0
-    total_rebar_meters = 0.0
-    
-    for code, count in sorted(footing_counts.items()):
-        spec = sched[code]
-        A = spec["A"]
-        B = spec["B"]
-        T = spec["T"]
-        
-        # ปริมาตรคอนกรีตฐานราก
-        pad_vol_each = A * B * T
-        pad_vol_total = pad_vol_each * count
-        total_concrete_m3 += pad_vol_total
-        
-        # ปริมาตรคอนกรีตหยาบ (Lean)
-        lean_vol_each = A * B * LEAN_CONCRETE_AREA_FACTOR * LEAN_CONCRETE_THICKNESS_M
-        lean_vol_total = lean_vol_each * count
-        total_lean_m3 += lean_vol_total
-        
-        # เหล็กเสริม DB12 (ความยาวตัดสุทธิหักระยะ Cover 5 ซม. 2 ด้าน + พับขอ 90 องศา)
-        cut_length_a = A - (2 * COVER_IN_SOIL_M) + (2 * 0.10) # เผื่อพับขอข้างละ 10 ซม.
-        cut_length_b = B - (2 * COVER_IN_SOIL_M) + (2 * 0.10)
-        
-        bars_a = int(spec["reinforce_a"].split("-")[0])
-        bars_b = int(spec["reinforce_b"].split("-")[0])
-        
-        rebar_len_each = (cut_length_a * bars_a) + (cut_length_b * bars_b)
-        rebar_len_total = rebar_len_each * count
-        total_rebar_meters += rebar_len_total
-        
-        # คำนวณการสั่งซื้อเหล็กเส้น 10 ม. (Cutting List)
-        pieces_per_10m = math.floor(STOCK_BAR_LENGTH_M / max(cut_length_a, cut_length_b))
-        total_pieces = (bars_a + bars_b) * count
-        bars_to_order = math.ceil(total_pieces / pieces_per_10m) if pieces_per_10m > 0 else 0
-        
-        rows.append({
-            "code": code,
-            "count": count,
-            "dimensions": f"{A:.2f} × {B:.2f} × {T:.2f}",
-            "concrete_m3": round(pad_vol_total, 3),
-            "lean_m3": round(lean_vol_total, 3),
-            "rebar_meters": round(rebar_len_total, 2),
-            "bars_10m_order": bars_to_order
-        })
 
-    # 3. ผลลัพธ์สรุปภาพรวม
-    revit_benchmark_concrete = 7.12
-    revit_benchmark_count = 18
-    
-    accuracy_count_match = (total_count == revit_benchmark_count)
-    accuracy_vol_match = (abs(round(total_concrete_m3, 2) - revit_benchmark_concrete) < 0.01)
-    
-    result = {
-        "status": "VERIFIED_100%" if (accuracy_count_match and accuracy_vol_match) else "MISMATCH",
-        "total_footings_count": total_count,
-        "revit_ground_truth_count": revit_benchmark_count,
-        "is_count_100_percent": accuracy_count_match,
-        "total_concrete_m3": round(total_concrete_m3, 3),
-        "revit_ground_truth_m3": revit_benchmark_concrete,
-        "is_volume_100_percent": accuracy_vol_match,
-        "total_lean_m3": round(total_lean_m3, 3),
-        "total_rebar_db12_kg": round(total_rebar_meters * DB12_KG_PER_M, 2),
-        "items": rows,
-        "grid_positions": grid_details
-    }
-    return result
+def main():
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("pdf_path")
+    ap.add_argument("--drawing-no", default="S-05")
+    ap.add_argument("--page", type=int, default=None)
+    args = ap.parse_args()
+    result = extract_footing_takeoff(args.pdf_path, drawing_no=args.drawing_no, page_index=args.page)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
 
 if __name__ == "__main__":
-    if sys.platform == "win32":
-        try:
-            sys.stdout.reconfigure(encoding='utf-8')
-        except Exception:
-            pass
-    res = calculate_footing_takeoff()
-    print("================================================================")
-    print("ผลการตรวจสอบและคำนวณฐานราก (Plan2BOQ Calibrated Engine)")
-    print("================================================================")
-    print(f"สถานะความถูกต้อง: {res['status']}")
-    print(f"จำนวนฐานรากรวม:   {res['total_footings_count']} ฐาน (Revit Ground Truth: {res['revit_ground_truth_count']} ฐาน) -> {'ถูกต้อง 100%' if res['is_count_100_percent'] else 'เพี้ยน'}")
-    print(f"ปริมาตรคอนกรีตรวม: {res['total_concrete_m3']} ลบ.ม. (Revit Ground Truth: {res['revit_ground_truth_m3']} ลบ.ม.) -> {'ถูกต้อง 100%' if res['is_volume_100_percent'] else 'เพี้ยน'}")
-    print("----------------------------------------------------------------")
-    print("รายละเอียดแยกตามรหัสฐานราก:")
-    for row in res["items"]:
-        print(f"  • {row['code']}: จำนวน {row['count']} ฐาน | ขนาด {row['dimensions']} ม. | คอนกรีต {row['concrete_m3']} ม3 | Lean {row['lean_m3']} ม3 | สั่งเหล็ก 10ม. = {row['bars_10m_order']} เส้น")
-    print("================================================================")
+    main()

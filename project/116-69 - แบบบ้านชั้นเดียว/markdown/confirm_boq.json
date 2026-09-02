@@ -1,0 +1,289 @@
+{
+  "pdftoboq_version": "phase-a-2569-09-02",
+  "generated_at": "2026-09-02T16:17:03.835198",
+  "pdf_path": "../project/116-69 - แบบบ้านชั้นเดียว/PDF/116-69 - แบบบ้านชั้นเดียว.pdf",
+  "page_count": 47,
+  "categories": {
+    "footing": {
+      "status": "positions_and_sizes_confirmed",
+      "drawing_page": 33,
+      "scale_denominator": 75.0,
+      "notes": [
+        "ยังไม่มีความหนา (T) และเหล็กเสริม -- ตารางสเปคฐานรากมักถูก flatten เป็น vector อ่านด้วย text ไม่ได้ ต้องรอ Phase B (AI vision fallback)"
+      ],
+      "items": [
+        {
+          "code": "F1",
+          "count": 1,
+          "size_m": [
+            0.6,
+            0.6
+          ],
+          "thickness_m": null,
+          "rebar": null,
+          "concrete_m3_each": null,
+          "concrete_m3_total": null,
+          "source": "vector_geometry",
+          "status": "needs_vision_for_spec",
+          "area_m2_each": 0.36
+        },
+        {
+          "code": "F2",
+          "count": 10,
+          "size_m": [
+            1.2,
+            1.2
+          ],
+          "thickness_m": null,
+          "rebar": null,
+          "concrete_m3_each": null,
+          "concrete_m3_total": null,
+          "source": "vector_geometry",
+          "status": "needs_vision_for_spec",
+          "area_m2_each": 1.44
+        },
+        {
+          "code": "F3",
+          "count": 7,
+          "size_m": [
+            1.4,
+            1.4
+          ],
+          "thickness_m": null,
+          "rebar": null,
+          "concrete_m3_each": null,
+          "concrete_m3_total": null,
+          "source": "vector_geometry",
+          "status": "needs_vision_for_spec",
+          "area_m2_each": 1.96
+        }
+      ],
+      "positions": [
+        {
+          "grid": "A1",
+          "pier_code": "C1",
+          "footing_code": "F2",
+          "size_m": [
+            1.2,
+            1.2
+          ]
+        },
+        {
+          "grid": "B1",
+          "pier_code": "C1",
+          "footing_code": "F3",
+          "size_m": [
+            1.4,
+            1.4
+          ]
+        },
+        {
+          "grid": "D1",
+          "pier_code": "C1",
+          "footing_code": "F3",
+          "size_m": [
+            1.4,
+            1.4
+          ]
+        },
+        {
+          "grid": "E1",
+          "pier_code": "C1",
+          "footing_code": "F2",
+          "size_m": [
+            1.2,
+            1.2
+          ]
+        },
+        {
+          "grid": "E3",
+          "pier_code": "C1",
+          "footing_code": "F2",
+          "size_m": [
+            1.2,
+            1.2
+          ]
+        },
+        {
+          "grid": "B2",
+          "pier_code": "C1",
+          "footing_code": "F3",
+          "size_m": [
+            1.4,
+            1.4
+          ]
+        },
+        {
+          "grid": "A2",
+          "pier_code": "C1",
+          "footing_code": "F2",
+          "size_m": [
+            1.2,
+            1.2
+          ]
+        },
+        {
+          "grid": "D3",
+          "pier_code": "C1",
+          "footing_code": "F3",
+          "size_m": [
+            1.4,
+            1.4
+          ]
+        },
+        {
+          "grid": "D5",
+          "pier_code": "C1",
+          "footing_code": "F3",
+          "size_m": [
+            1.4,
+            1.4
+          ]
+        },
+        {
+          "grid": "E5",
+          "pier_code": "C1",
+          "footing_code": "F2",
+          "size_m": [
+            1.2,
+            1.2
+          ]
+        },
+        {
+          "grid": "E8",
+          "pier_code": "C1",
+          "footing_code": "F2",
+          "size_m": [
+            1.2,
+            1.2
+          ]
+        },
+        {
+          "grid": "D8",
+          "pier_code": "C1",
+          "footing_code": "F2",
+          "size_m": [
+            1.2,
+            1.2
+          ]
+        },
+        {
+          "grid": "B6",
+          "pier_code": "C1",
+          "footing_code": "F3",
+          "size_m": [
+            1.4,
+            1.4
+          ]
+        },
+        {
+          "grid": "A6",
+          "pier_code": "C1",
+          "footing_code": "F2",
+          "size_m": [
+            1.2,
+            1.2
+          ]
+        },
+        {
+          "grid": "A4",
+          "pier_code": "C1",
+          "footing_code": "F2",
+          "size_m": [
+            1.2,
+            1.2
+          ]
+        },
+        {
+          "grid": "B4",
+          "pier_code": "C1",
+          "footing_code": "F3",
+          "size_m": [
+            1.4,
+            1.4
+          ]
+        },
+        {
+          "grid": "B7",
+          "pier_code": "C1",
+          "footing_code": "F1",
+          "size_m": [
+            0.6,
+            0.6
+          ]
+        },
+        {
+          "grid": "C7",
+          "pier_code": "C1",
+          "footing_code": "F2",
+          "size_m": [
+            1.2,
+            1.2
+          ]
+        }
+      ],
+      "total_count": 18,
+      "summary": {
+        "concrete_m3_net": null,
+        "concrete_m3_with_waste": null,
+        "status": "blocked_needs_thickness_spec"
+      }
+    },
+    "pier_column": {
+      "status": "partial",
+      "drawing_page": 33,
+      "schedule_page": 37,
+      "height_source_page": 10,
+      "excavation_note_page": 30,
+      "notes": [
+        "ความสูงตอม่อ 2.05ม. เป็นค่าประมาณ: ระดับพื้น 1.0ม. (ค่าเผื่อทั่วไป ยังไม่ยืนยันจากแบบ) ลบระดับหัวฐานราก (−1.2ม.ขุดดิน+0.1ม.ทราย+0.05ม.คอนกรีตหยาบ) -- ยังไม่รวมความหนาฐานราก (T) เพราะยังไม่มีจากตารางสเปค (รอ Phase B)"
+      ],
+      "items": [
+        {
+          "code": "C1",
+          "count": 18,
+          "cross_section_m": [
+            0.2,
+            0.2
+          ],
+          "main_rebar": "4-DB12",
+          "stirrup": "1-RB6@0.150m",
+          "pier_height_m": 2.05,
+          "pier_height_status": "estimated",
+          "column_height_m": 3.3,
+          "column_height_status": "estimated_from_drawing"
+        }
+      ],
+      "total_count": 18,
+      "summary": {
+        "status": "computed",
+        "concrete_m3_net": 3.852,
+        "concrete_m3_with_waste": 3.968,
+        "main_bar_kg_net": 342.06,
+        "main_bar_kg_with_waste": 359.16,
+        "stirrup_count": 684,
+        "stirrup_kg_net": 136.66,
+        "stirrup_kg_with_waste": 143.5,
+        "note": "เหล็กยืนยังไม่รวมความยาวฮุคเข้าฐานราก (ต้องรู้ขนาดฐานรากต่อจุด, รอ Phase B)"
+      }
+    },
+    "beam": {
+      "status": "not_implemented",
+      "notes": [
+        "รอ Phase C"
+      ]
+    },
+    "floor": {
+      "status": "not_implemented",
+      "notes": [
+        "รอ Phase C"
+      ]
+    },
+    "roof": {
+      "status": "not_implemented",
+      "notes": [
+        "รอ Phase B (ตารางผู้ออกแบบมักเป็นภาพ)"
+      ]
+    }
+  }
+}

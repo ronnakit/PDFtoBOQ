@@ -172,7 +172,7 @@
             <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
                 <div>
                     <span class="text-[10px] font-semibold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
-                        <i class="fa-solid fa-circle-check mr-1"></i> ถอดแบบสำเร็จสมบูรณ์
+                        <i class="fa-solid fa-circle-check mr-1"></i> ถอดแบบสำเร็จ
                     </span>
                     <h2 id="resFileName" class="text-base font-bold text-white mt-1">สรุปปริมาณงานโครงสร้าง</h2>
                 </div>
@@ -211,6 +211,11 @@
                 </div>
             </div>
 
+            <div id="partialResultBanner" class="hidden text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+                ผลนี้เป็นการถอดแบบบางส่วน — บางหมวดยังคำนวณไม่ได้ (รอระบบ AI อ่านตารางสเปคเพิ่มเติม) ดูคอลัมน์สถานะรายหมวดด้านล่าง
+            </div>
+
             <!-- Itemized Category Breakdown Table -->
             <div class="clean-panel rounded-xl p-4 border border-slate-800 space-y-3">
                 <h3 class="text-xs font-bold text-white">ตารางแจกแจงแยกตามหมวดหมู่โครงสร้าง</h3>
@@ -223,6 +228,7 @@
                                 <th class="py-2.5 px-3">คอนกรีต (ลบ.ม.)</th>
                                 <th class="py-2.5 px-3">เหล็กเสริม (กก.)</th>
                                 <th class="py-2.5 px-3">ขนาดเหล็กที่ใช้</th>
+                                <th class="py-2.5 px-3">สถานะ</th>
                             </tr>
                         </thead>
                         <tbody id="categoryTableBody" class="divide-y divide-slate-800/60">
@@ -483,16 +489,30 @@
             document.getElementById('kpiConcrete').textContent = summary.total_concrete_m3.toFixed(2);
             document.getElementById('kpiSteelKg').textContent = summary.total_steel_kg.toLocaleString();
             document.getElementById('kpiSteelTon').textContent = summary.total_steel_ton.toFixed(2);
-            document.getElementById('kpiFormwork').textContent = summary.total_formwork_m2.toFixed(1);
+            document.getElementById('kpiFormwork').textContent = (summary.total_formwork_m2 == null) ? 'ยังไม่รองรับ' : summary.total_formwork_m2.toFixed(1);
+
+            const partialBanner = document.getElementById('partialResultBanner');
+            if (partialBanner) {
+                partialBanner.classList.toggle('hidden', !summary.is_partial);
+            }
+
+            const STATUS_LABEL = {
+                computed: '<span class="text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded text-[10px]">คำนวณแล้ว</span>',
+                positions_and_sizes_confirmed: '<span class="text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded text-[10px]">ตำแหน่ง/ขนาดยืนยันแล้ว</span>',
+                blocked_needs_thickness_spec: '<span class="text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded text-[10px]">รอ AI อ่านสเปค</span>',
+                partial: '<span class="text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded text-[10px]">บางส่วน</span>',
+                not_implemented: '<span class="text-slate-500 bg-slate-500/10 px-2 py-0.5 rounded text-[10px]">ยังไม่รองรับ</span>',
+            };
 
             const tbody = document.getElementById('categoryTableBody');
             tbody.innerHTML = summary.categories.map(c => `
                 <tr class="hover:bg-slate-900/40">
                     <td class="py-2.5 px-3 font-semibold text-white">${c.category}</td>
                     <td class="py-2.5 px-3 text-slate-300 font-mono text-[11px]">${c.items}</td>
-                    <td class="py-2.5 px-3 text-orange-400 font-semibold">${c.concrete_m3 > 0 ? c.concrete_m3.toFixed(2) : '-'}</td>
-                    <td class="py-2.5 px-3 text-slate-200 font-semibold">${c.steel_kg.toLocaleString()}</td>
+                    <td class="py-2.5 px-3 text-orange-400 font-semibold">${c.concrete_m3 != null ? c.concrete_m3.toFixed(2) : '-'}</td>
+                    <td class="py-2.5 px-3 text-slate-200 font-semibold">${c.steel_kg != null ? c.steel_kg.toLocaleString() : '-'}</td>
                     <td class="py-2.5 px-3 text-slate-400 text-[11px]">${c.rebar_specs}</td>
+                    <td class="py-2.5 px-3">${STATUS_LABEL[c.status] || c.status}</td>
                 </tr>
             `).join('');
         }

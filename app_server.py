@@ -16,6 +16,73 @@ FRONTEND_DIR = os.path.join(BASE_DIR, "frontend")
 LOGS_DIR = os.path.join(BASE_DIR, "logs")
 LEADS_FILE = os.path.join(LOGS_DIR, "leads.json")
 
+sys.path.insert(0, os.path.join(BASE_DIR, "python"))
+from pipeline_orchestrator import run_pipeline  # noqa: E402
+
+CATEGORY_LABELS = {
+    "footing": "งานฐานราก ค.ส.ล. (Footings)",
+    "pier_column": "งานตอม่อและเสา (Piers & Columns)",
+    "beam": "งานคาน (Beams)",
+    "floor": "งานพื้น (Floors)",
+    "roof": "งานโครงสร้างหลังคา (Roof Steel Frame)",
+}
+
+
+def build_takeoff_summary(pipeline_result):
+    """แปลงผลลัพธ์จาก pipeline_orchestrator (per-category, มี status) เป็นรูปแบบที่หน้าเว็บแสดงผลได้
+    -- หมวดที่ยังคำนวณไม่ได้ (Phase B/C ยังไม่เสร็จ) ปล่อย concrete_m3/steel_kg เป็น None แทนการเดาเป็น 0
+    เพื่อไม่ให้ผู้ใช้เข้าใจผิดว่าเป็นค่าจริง (ตรงกับกฎ: ห้ามคืนตัวเลขเปล่าๆ ที่ไม่มีสถานะกำกับ)."""
+    categories = pipeline_result.get("categories", {})
+    total_concrete = 0.0
+    total_steel = 0.0
+    any_incomplete = False
+
+    rows = []
+    for key, label in CATEGORY_LABELS.items():
+        cat = categories.get(key, {})
+        summary = cat.get("summary", {})
+        status = summary.get("status") or cat.get("status") or "not_implemented"
+
+        concrete = summary.get("concrete_m3_with_waste")
+        steel = 0.0
+        steel_known = False
+        for steel_key in ("main_bar_kg_with_waste", "stirrup_kg_with_waste"):
+            if summary.get(steel_key) is not None:
+                steel += summary[steel_key]
+                steel_known = True
+
+        if concrete is not None:
+            total_concrete += concrete
+        if steel_known:
+            total_steel += steel
+        if status != "computed":
+            any_incomplete = True
+
+        items = cat.get("items", [])
+        item_desc = ", ".join(
+            f"{i.get('code')} ({i.get('count')})" for i in items if i.get("code")
+        ) or "-"
+        rebar_specs = summary.get("note") or "; ".join(cat.get("notes", [])) or "-"
+
+        rows.append({
+            "category": label,
+            "items": item_desc,
+            "concrete_m3": round(concrete, 3) if concrete is not None else None,
+            "steel_kg": round(steel, 2) if steel_known else None,
+            "rebar_specs": rebar_specs,
+            "status": status,
+        })
+
+    return {
+        "total_concrete_m3": round(total_concrete, 3),
+        "total_steel_kg": round(total_steel, 2),
+        "total_steel_ton": round(total_steel / 1000.0, 3),
+        "total_formwork_m2": None,
+        "is_partial": any_incomplete,
+        "phase": pipeline_result.get("pdftoboq_version"),
+        "categories": rows,
+    }
+
 os.makedirs(PROJECTS_DIR, exist_ok=True)
 os.makedirs(FRONTEND_DIR, exist_ok=True)
 os.makedirs(LOGS_DIR, exist_ok=True)
@@ -146,9 +213,6 @@ class Plan2BOQHandler(BaseHTTPRequestHandler):
 
             # ตรวจสอบชื่อไฟล์ว่าเป็นตัวอย่างทดสอบแบบไม่ครบหรือไม่
             is_test_incomplete = "incomplete" in file_name.lower() or "fail" in file_name.lower() or "ขาด" in file_name
-            
-            # จำลองเวลาประมวลผล (1.2 - 1.8 วินาที)
-            time.sleep(1.2)
             duration_seconds = round(time.time() - start_time, 2)
             
             if is_test_incomplete:
@@ -184,50 +248,11 @@ class Plan2BOQHandler(BaseHTTPRequestHandler):
                 })
                 return
 
-            # กรณีแบบสมบูรณ์ (Success Takeoff)
-            takeoff_summary = {
-                "total_concrete_m3": 48.50,
-                "total_steel_kg": 4210.00,
-                "total_steel_ton": 4.21,
-                "total_formwork_m2": 215.00,
-                "categories": [
-                    {
-                        "category": "งานฐานราก ค.ส.ล. (Footings)",
-                        "items": "F1 (1 ฐาน), F2 (10 ฐาน), F3 (7 ฐาน) [รวม 18 ฐาน]",
-                        "concrete_m3": 7.12,
-                        "steel_kg": 542.00,
-                        "rebar_specs": "DB12 (ตัดตามความยาวหัก Cover 5ซม.)"
-                    },
-                    {
-                        "category": "งานตอม่อและเสา (Columns & Piers)",
-                        "items": "C1 (10 ต้น), C2 (4 ต้น)",
-                        "concrete_m3": 6.80,
-                        "steel_kg": 850.00,
-                        "rebar_specs": "4-DB12, 4-DB16, ปลอก RB6"
-                    },
-                    {
-                        "category": "งานคานคอดินและคานชั้นบน (Beams)",
-                        "items": "B1, B2, B3, RB (รวม 18 แนว)",
-                        "concrete_m3": 18.30,
-                        "steel_kg": 1820.00,
-                        "rebar_specs": "DB12, DB16 บน-ล่าง, ปลอก RB6"
-                    },
-                    {
-                        "category": "งานพื้น (Floors)",
-                        "items": "S1 (หล่อในที่), S2 (พื้นสำเร็จ), GS",
-                        "concrete_m3": 15.00,
-                        "steel_kg": 360.00,
-                        "rebar_specs": "Wiremesh 6mm @0.20m, RB9 เสริมพิเศษ"
-                    },
-                    {
-                        "category": "งานโครงสร้างหลังคา (Roof Steel Frame)",
-                        "items": "จันทัน, แป, อะเส, ตะเข้สัน",
-                        "concrete_m3": 0.00,
-                        "steel_kg": 500.00,
-                        "rebar_specs": "เหล็กกล่อง 100x50x3.2mm, แป C 75x45x15mm"
-                    }
-                ]
-            }
+            # กรณีแบบสมบูรณ์ -- เรียก pipeline จริง (โค้ดล้วน Phase A: ฐานราก+ตอม่อ-เสา, คาน/พื้น/
+            # หลังคายังไม่เสร็จ -- ดู build_takeoff_summary สำหรับวิธีจัดการหมวดที่ยังไม่มีตัวเลข)
+            pipeline_result = run_pipeline(pdf_saved_path, project_dir=proj_dir)
+            takeoff_summary = build_takeoff_summary(pipeline_result)
+            duration_seconds = round(time.time() - start_time, 2)
 
             log_entry = {
                 "session_id": session_id,
@@ -235,8 +260,9 @@ class Plan2BOQHandler(BaseHTTPRequestHandler):
                 "file_name": file_name,
                 "file_size_mb": round(file_size_bytes / (1024 * 1024), 2),
                 "processing_duration_sec": duration_seconds,
-                "status": "SUCCESS",
-                "status_label": "ถอดแบบสำเร็จ 100%",
+                "status": "PARTIAL" if takeoff_summary.get("is_partial") else "SUCCESS",
+                "status_label": "ถอดแบบบางส่วน (ฐานราก+ตอม่อ-เสา ยืนยันแล้ว, หมวดอื่นรอ AI vision)"
+                                 if takeoff_summary.get("is_partial") else "ถอดแบบสำเร็จ",
                 "results": takeoff_summary,
                 "missing_reasons": [],
                 "lead_email": None
