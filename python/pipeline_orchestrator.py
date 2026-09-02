@@ -141,18 +141,26 @@ def compute_pier_column_summary(pc_result):
 
 
 def compute_roof_summary(roof_result):
-    """แปลงผลลัพธ์จาก extract_roof_boq.py (คำนวณน้ำหนักในตัวอยู่แล้วเพราะเป็นหมวดที่ใช้ AI vision เป็น
-    วิธีหลัก ไม่ใช่ fallback) ให้เข้ารูปแบบ summary เดียวกับหมวดอื่น (concrete_m3.../steel_kg...)."""
-    if roof_result.get("status") != "computed":
-        return {"status": roof_result.get("status", "not_implemented")}
+    """แปลงผลลัพธ์จาก extract_roof_boq.py ให้เข้ารูปแบบ summary เดียวกับหมวดอื่น (concrete_m3.../
+    steel_kg...) -- รองรับ 2 สถานะสำเร็จ: "computed" (อ่านจากตารางสรุปของผู้ออกแบบ เชื่อถือได้สูง) และ
+    "computed_from_framing_plan" (ไม่มีตารางสรุป, AI vision อ่านเรขาคณิต+สเปคจากแปลนโครงหลังคาเอง
+    แม่นยำต่ำกว่า โดยเฉพาะรายการที่ confidence="estimated")"""
+    status = roof_result.get("status")
+    if status not in ("computed", "computed_from_framing_plan"):
+        return {"status": status or "not_implemented"}
+    is_estimate = status == "computed_from_framing_plan"
+    note = (f"เหล็กโครงสร้างหลังคารวม {roof_result.get('total_length_structural_m')}ม. "
+            f"(ไม่รวมวัสดุครอบสัน/ครอบหลังคา {sum(r.get('total_length_m') or 0 for r in roof_result.get('non_structural_rows', [])):.2f}ม. ที่ไม่มีสเปคหน้าตัดเหล็ก)")
+    if is_estimate:
+        note += (" -- ไม่มีตารางสรุปจากผู้ออกแบบ คำนวณจากแปลนโครงหลังคาด้วย AI vision เอง "
+                 "ความแม่นยำต่ำกว่าทางตารางสรุป ดู notes/confidence รายรายการ")
     return {
-        "status": "computed",
+        "status": status,
         "concrete_m3_net": None,
         "concrete_m3_with_waste": None,
         "steel_kg_net": roof_result.get("total_weight_kg_net"),
         "steel_kg_with_waste": roof_result.get("total_weight_kg_with_waste"),
-        "note": f"เหล็กโครงสร้างหลังคารวม {roof_result.get('total_length_structural_m')}ม. "
-                f"(ไม่รวมวัสดุครอบสัน/ครอบหลังคา {sum(r.get('total_length_m') or 0 for r in roof_result.get('non_structural_rows', [])):.2f}ม. ที่ไม่มีสเปคหน้าตัดเหล็ก)",
+        "note": note,
     }
 
 

@@ -3,13 +3,19 @@
 เขียนใหม่ทั้งหมด (2569-09-02) แทนเวอร์ชันเดิมที่ผูกกับโทโพโลยีหลังคาของโปรเจกต์เดียว (newhouse, อ่าน
 จาก MD/roof_geometry.md) ใช้กับโปรเจกต์อื่นไม่ได้เลย -- ดู LOG.md ของฝั่งเอกสารพิมพ์เขียว 2569-09-02
 
-ต่างจากฐานราก/ตอม่อ-เสาตรงที่**ใช้ AI vision เป็นวิธีหลัก ไม่ใช่ fallback** เพราะตาราง "ถอดปริมาณงาน
-โครงสร้างคานเหล็กหลังคา" ที่ผู้ออกแบบสรุปความยาวรวมแต่ละชนิดไว้เอง (น่าเชื่อถือกว่าให้โค้ดนับเส้นเอง
-จากแบบ เพราะเรขาคณิตหลังคาซับซ้อนและแตกต่างกันมากในแต่ละหลัง) แทบทุกครั้งถูก flatten เป็น vector อ่าน
-ด้วย text ไม่ได้เลย (ยืนยันแล้วกับ 116-69: ทั้ง S-07/S-08 มีตารางนี้ซ้ำกัน และ page.get_text() อ่าน
-ตัวเลขในตารางไม่ได้เลยสักตัว)
+ต่างจากฐานราก/ตอม่อ-เสาตรงที่**ใช้ AI vision เป็นวิธีหลัก ไม่ใช่ fallback ของโค้ดล้วน** เพราะเรขาคณิต
+หลังคาซับซ้อนและแตกต่างกันมากในแต่ละหลัง -- แต่มี 2 ทางเลือกเรียงลำดับความน่าเชื่อถือ:
 
-วิธีทำงาน:
+1. **ทางหลัก (แม่นกว่า):** ถ้าไฟล์นี้มีตาราง "ถอดปริมาณงานโครงสร้างคานเหล็กหลังคา" ที่ผู้ออกแบบสรุปความยาว
+   รวมแต่ละชนิดไว้เอง (แทบทุกครั้งถูก flatten เป็น vector อ่านด้วย text ไม่ได้เลย -- ยืนยันแล้วกับ 116-69)
+   ใช้ตัวเลขนั้นเลย น่าเชื่อถือกว่าให้โค้ด/AI นับเส้นเอง
+2. **ทางสำรอง (เมื่อไม่มีตารางสรุปเลย):** ให้ AI vision อ่านเรขาคณิต+ตารางสเปคเหล็กจากแปลนโครงหลังคา
+   โดยตรง (`_extract_roof_from_framing_plan`) -- **ไม่ใช่ข้อจำกัดที่ทำให้หยุดเป็น "not_found" อีกต่อไป**
+   (แก้ 2569-09-02 ตามคำสั่งเจ้าของโปรเจกต์: "ทำไมต้องหาตารางถอดปริมาณ...เราจะให้ไพน้อยอ่านแบบและถอดอยู่
+   แล้ว") -- แม่นยำต่ำกว่าทางหลัก โดยเฉพาะจันทัน/แปที่ต้องประมาณจำนวนเส้นจากระยะห่าง (@1.00ม. ฯลฯ) ไม่ได้
+   นับทีละเส้นจริง ทุก item มี confidence กำกับ (measured/estimated) เสมอ
+
+วิธีทำงานทางหลัก:
 1. หาแผ่นแบบที่มีตารางนี้จาก**เนื้อหาหัวตารางเอง** (ค้นทุกหน้า ไม่ใช้เลขแผ่นเป็นตัวกรอง เพราะเลขแผ่น
    เป็นธรรมเนียมเฉพาะสำนักงานออกแบบแต่ละที่ ไม่สื่อความหมายเดียวกันข้ามโปรเจกต์ -- ยืนยันแล้วกับหมวดอื่น)
 2. หาตำแหน่งตาราง**แบบ dynamic ไม่ hardcode พิกัด** -- ค้นข้อความ "ถอดปริมาณ"+"หลังคา" ที่ยังอ่านได้
@@ -43,6 +49,31 @@ STEEL_DENSITY_KG_PER_M3 = 7850.0
 ROOF_STEEL_CUTTING_WASTE = 0.05
 
 TABLE_TITLE_KEYWORDS = ("ถอดปริมาณ", "หลังคา")
+FRAMING_PLAN_DESCRIPTION_KEYWORDS = ("แปลนโครงหลังคา",)
+
+ROOF_FRAME_VISION_PROMPT = """ภาพนี้คือแปลนโครงสร้างหลังคา (roof framing plan) ของบ้าน วาดตามมาตราส่วนที่
+ระบุในภาพ มีเส้นกริด+เส้นบอกระยะ (เมตร) และมักมีตาราง "รายการเหล็กโครงสร้างหลังคา" อยู่ในภาพเดียวกัน ระบุ
+ชนิดเหล็ก (เช่น อะเส, ตั้ง, อกไก่, จันทัน, แป) คู่กับขนาดหน้าตัดและระยะห่าง (เช่น "จันทัน C-100x50x20x2.0mm.
+@1.00 ม." = จันทันหน้าตัดนี้ วางห่างกันทุก 1.00 ม.)
+
+**ไฟล์นี้ไม่มีตาราง "ถอดปริมาณ" สรุปความยาวรวมจากผู้ออกแบบ (ตรวจแล้ว) จึงต้องคำนวณความยาวรวมแต่ละชนิดเอง
+จากแปลน**
+
+งานของคุณ: สำหรับเหล็กแต่ละชนิดที่มีสเปคหน้าตัดชัดเจน (ไม่นับวัสดุมุงหลังคา/ครอบสันที่ไม่ใช่เหล็กโครงสร้าง)
+1. name_th -- ชื่อชนิด (เช่น "อะเส", "จันทัน", "แป", "อกไก่", "ตั้ง")
+2. profile: "C" หรือ "box" (อ่านจากสเปคหน้าตัดในตาราง) หรือ "unknown" ถ้าไม่ใช่เหล็กโครงสร้าง
+3. double: true ถ้าสเปคมี "2C" นำหน้า, dim1_mm/dim2_mm/dim3_mm/thickness_mm จากสเปคหน้าตัดในตาราง
+4. total_length_m -- ความยาวรวมโดยประมาณ คำนวณจาก:
+   - อะเส/อกไก่: ความยาวตามแนวขอบ/สันที่วิ่งจริงในแปลน (วัดจากเส้นบอกระยะ/กริด)
+   - จันทัน/แป: จำนวนเส้น (ประมาณจากความยาวขอบหลังคา ÷ ระยะห่างที่ระบุ เช่น @1.00ม.) × ความยาวเฉลี่ยต่อเส้น
+     (ประมาณจากขนาดหลังคาที่เห็นในแปลน ถ้าไม่เห็นมุมลาดชัดเจนให้ใช้ระยะทางแนวราบจากขอบถึงสันเป็นค่าประมาณ
+     ระบุ confidence เป็น "estimated" เสมอสำหรับกรณีนี้)
+5. confidence: "measured" (คำนวณจากเส้นบอกระยะที่ชัดเจนครบ) หรือ "estimated" (ต้องประมาณเพราะไม่เห็นมุมลาด/
+   เรขาคณิตที่ซับซ้อนเกินกว่าจะนับละเอียด)
+
+ตอบเป็น JSON ล้วนๆ เท่านั้น ไม่มีข้อความอื่น:
+{"rows": [{"name_th": "...", "profile": "C"|"box"|"unknown", "double": false, "dim1_mm": 0, "dim2_mm": 0,
+"dim3_mm": null, "thickness_mm": 0, "total_length_m": 0.0, "confidence": "measured"|"estimated"}]}"""
 
 ROOF_TABLE_VISION_PROMPT = """ภาพนี้คือตาราง "ถอดปริมาณงานโครงสร้างคานเหล็กหลังคา" มี 2 คอลัมน์: ชนิด
 โครงสร้างเหล็กหลังคา, ความยาวโดยรวม (ม.) อ่านทุกแถว (รวมแถว Grand total ถ้ามี) แล้วตอบเป็น JSON ล้วนๆ
@@ -125,6 +156,95 @@ def _read_sheet_number(page, spans, bottom_fraction=0.88):
     return None
 
 
+def _extract_roof_from_framing_plan(doc):
+    """เมื่อไม่มีตาราง "ถอดปริมาณ" สรุปจากผู้ออกแบบเลย -- หาแปลนโครงหลังคาเองผ่านสารบัญแบบของไฟล์นั้น
+    (เช่นเดียวกับที่ extract_floor_boq.py ทำกับแปลนพื้น) แล้วให้ AI vision อ่านเรขาคณิต+ตารางสเปคเหล็ก
+    ที่มักอยู่ในแปลนเดียวกัน คำนวณความยาวรวมเอง -- ความแม่นยำต่ำกว่าทางตารางสรุปของผู้ออกแบบ (โดยเฉพาะ
+    จันทัน/แป ที่ต้องประมาณจากระยะห่าง@ ไม่ใช่นับทีละเส้น) แต่ให้ตัวเลขออกมาได้เสมอแทนที่จะหยุดเป็น
+    not_found -- ทุก item ระบุ confidence กำกับชัดเจน"""
+    code, _desc = grid_utils.find_sheet_code_by_description(doc, list(FRAMING_PLAN_DESCRIPTION_KEYWORDS))
+    if code is None:
+        return {"status": "not_found",
+                "notes": ["ไม่พบตาราง 'ถอดปริมาณงานโครงสร้างคานเหล็กหลังคา' และไม่พบแปลนโครงหลังคาใน "
+                          "สารบัญแบบเลย -- ไม่มีทางถอดปริมาณหลังคาได้จากไฟล์นี้"],
+                "items": [], "non_structural_rows": []}
+    pno = grid_utils.find_drawing_page_by_title_block(doc, code)
+    if pno is None:
+        return {"status": "not_found",
+                "notes": [f"สารบัญแบบระบุแปลนโครงหลังคาเป็นแผ่น {code} แต่หาแผ่นนั้นในเอกสารไม่เจอจริง"],
+                "items": [], "non_structural_rows": []}
+
+    try:
+        import ai_vision_fallback
+    except ImportError as e:
+        return {"status": "blocked_no_ai_vision", "notes": [f"import ai_vision_fallback ไม่สำเร็จ: {e}"],
+                "items": [], "non_structural_rows": []}
+
+    page = doc[pno]
+    try:
+        pix = page.get_pixmap(dpi=250)
+        result = ai_vision_fallback.call_vision_json(pix.tobytes("png"), ROOF_FRAME_VISION_PROMPT,
+                                                       model="claude-sonnet-5", max_tokens=8000)
+    except Exception as e:
+        return {"status": "vision_call_failed", "notes": [f"AI vision เรียกไม่สำเร็จ (หน้า {pno + 1}): {e}"],
+                "items": [], "non_structural_rows": []}
+
+    if result.get("_parse_error") or not result.get("rows"):
+        return {"status": "vision_parse_failed",
+                "notes": [f"AI vision อ่านแปลนโครงหลังคาไม่สำเร็จ (หน้า {pno + 1})", str(result.get("_raw"))[:300]],
+                "items": [], "non_structural_rows": []}
+
+    items, non_structural = [], []
+    total_length_structural = 0.0
+    total_weight_net = 0.0
+    estimated_count = 0
+    for row in result["rows"]:
+        name = row.get("name_th") or "?"
+        length = row.get("total_length_m")
+        if row.get("profile") in ("C", "box") and length:
+            if row.get("confidence") == "estimated":
+                estimated_count += 1
+            kg_per_m = steel_profile_weight_kg_per_m(
+                row.get("profile"), row.get("dim1_mm"), row.get("dim2_mm"),
+                row.get("dim3_mm"), row.get("thickness_mm"), bool(row.get("double")),
+            )
+            weight = round(kg_per_m * length, 2) if kg_per_m else None
+            items.append({
+                "name_th": name, "profile": row.get("profile"), "double": bool(row.get("double")),
+                "dim1_mm": row.get("dim1_mm"), "dim2_mm": row.get("dim2_mm"),
+                "dim3_mm": row.get("dim3_mm"), "thickness_mm": row.get("thickness_mm"),
+                "total_length_m": length, "weight_kg_net": weight,
+                "confidence": row.get("confidence", "estimated"),
+            })
+            total_length_structural += length
+            if weight:
+                total_weight_net += weight
+        else:
+            non_structural.append({"name_th": name, "total_length_m": length})
+
+    if not items:
+        return {"status": "vision_parse_failed",
+                "notes": [f"อ่านแปลนโครงหลังคาได้ (หน้า {pno + 1}) แต่ไม่พบเหล็กโครงสร้างที่มีสเปคหน้าตัดเลย"],
+                "items": [], "non_structural_rows": non_structural}
+
+    return {
+        "status": "computed_from_framing_plan",
+        "drawing_page": pno + 1,
+        "drawing_no": code,
+        "items": items,
+        "non_structural_rows": non_structural,
+        "total_length_structural_m": round(total_length_structural, 2),
+        "total_weight_kg_net": round(total_weight_net, 2),
+        "total_weight_kg_with_waste": round(total_weight_net * (1 + ROOF_STEEL_CUTTING_WASTE), 2),
+        "notes": [
+            "ไม่มีตาราง 'ถอดปริมาณ' สรุปจากผู้ออกแบบ -- ให้ AI vision อ่านเรขาคณิต+ตารางสเปคจากแปลนโครง"
+            "หลังคาโดยตรงแทน ความแม่นยำต่ำกว่าทางตารางสรุป โดยเฉพาะรายการที่ confidence=\"estimated\" "
+            f"({estimated_count}/{len(items)} รายการ) ซึ่งประมาณจากระยะห่าง@ ไม่ได้นับทีละเส้นจริง",
+            "น้ำหนักคำนวณจากสูตรฟิสิกส์ (พื้นที่หน้าตัด x ความหนาแน่นเหล็ก 7850 กก./ลบ.ม.)",
+        ],
+    }
+
+
 def extract_roof_takeoff(pdf_path):
     """หาแผ่นที่มีตาราง "ถอดปริมาณ...หลังคา" **จากเนื้อหาหัวตารางเอง** (`_find_table_crop_region`
     ค้นด้วย `TABLE_TITLE_KEYWORDS` อยู่แล้ว) ไล่ทุกหน้าในเอกสาร -- ไม่ใช้เลขแผ่น (`S-07`/`S-08` เดิม)
@@ -203,12 +323,10 @@ def extract_roof_takeoff(pdf_path):
             "notes": notes,
         }
 
-    return {
-        "status": "not_found",
-        "notes": ["ไม่พบตาราง 'ถอดปริมาณงานโครงสร้างคานเหล็กหลังคา' ในหน้าไหนของเอกสารเลย -- อาจไม่มี "
-                  "ตารางนี้ในโปรเจกต์นี้ (ผู้ออกแบบบางรายไม่สรุปให้) ต้องนับเส้นจากแบบเอง (ยังไม่รองรับ)"],
-        "items": [], "non_structural_rows": [],
-    }
+    # ไม่พบตารางสรุปของผู้ออกแบบเลยทั้งเอกสาร -- fallback ไปให้ AI vision อ่านเรขาคณิต+ตารางสเปคจาก
+    # แปลนโครงหลังคาโดยตรงแทน (ตรงกับที่เจ้าของโปรเจกต์ยืนยัน 2569-09-02: "ทำไมต้องหาตารางถอดปริมาณ...
+    # เราจะให้ไพน้อยอ่านแบบและถอดอยู่แล้ว" -- ไม่ใช้ "ไม่มีตาราง" เป็นจุดจบอีกต่อไป)
+    return _extract_roof_from_framing_plan(doc)
 
 
 def main():

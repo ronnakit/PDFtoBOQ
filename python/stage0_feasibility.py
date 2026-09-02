@@ -66,10 +66,21 @@ def assess_structural_feasibility(pdf_path):
         if extract_roof_boq._find_table_crop_region(page, spans) is not None:
             roof_pno = pno
             break
-    result["roof"] = {"feasible": roof_pno is not None,
-                       "page": (roof_pno + 1) if roof_pno is not None else None,
-                       "note": "พบหัวตาราง 'ถอดปริมาณ...หลังคา'" if roof_pno is not None else
-                               "ไม่พบตาราง 'ถอดปริมาณ...หลังคา' ในหน้าไหนเลย -- อาจไม่มีตารางนี้ในโปรเจกต์นี้"}
+    if roof_pno is not None:
+        result["roof"] = {"feasible": True, "page": roof_pno + 1,
+                           "note": "พบตารางสรุป 'ถอดปริมาณ...หลังคา' จากผู้ออกแบบ (ทางแม่นสุด)"}
+    else:
+        # ไม่มีตารางสรุปจากผู้ออกแบบ ไม่ใช่จุดจบอีกต่อไป -- เช็คว่ามีแปลนโครงหลังคาให้ AI vision อ่านเอง
+        # ได้ไหมแทน (ดู extract_roof_boq.py::_extract_roof_from_framing_plan)
+        frame_code, _d = grid_utils.find_sheet_code_by_description(
+            doc, list(extract_roof_boq.FRAMING_PLAN_DESCRIPTION_KEYWORDS))
+        frame_pno = grid_utils.find_drawing_page_by_title_block(doc, frame_code) if frame_code else None
+        result["roof"] = {
+            "feasible": frame_pno is not None,
+            "page": (frame_pno + 1) if frame_pno is not None else None,
+            "note": (f"ไม่พบตารางสรุปจากผู้ออกแบบ -- จะใช้ AI vision อ่านแปลนโครงหลังคา {frame_code} แทน "
+                     "(แม่นยำต่ำกว่าทางตารางสรุป)") if frame_pno is not None else
+                    "ไม่พบทั้งตารางสรุปและแปลนโครงหลังคาในสารบัญแบบเลย"}
     return result
 
 
@@ -88,12 +99,10 @@ def floor_roof_standards_notes(feasibility):
 
     roof = feasibility.get("roof", {})
     if roof.get("feasible"):
-        notes.append(f"หลังคา: พบตาราง 'ถอดปริมาณงานโครงสร้างคานเหล็กหลังคา' ที่หน้า {roof.get('page')} "
-                      "(ผู้ออกแบบสรุปความยาวรวมไว้เอง น่าเชื่อถือกว่าให้โค้ดนับเส้นเอง)")
+        notes.append(f"หลังคา: {roof.get('note', '')} (หน้า {roof.get('page')})")
     else:
-        notes.append("หลังคา: ไม่พบตาราง 'ถอดปริมาณงานโครงสร้างคานเหล็กหลังคา' ในหน้าไหนของเอกสารเลย "
-                      "(ไล่ครบทุกหน้าแล้ว) -- ผู้ออกแบบรายนี้อาจไม่สรุปตารางนี้ให้ ต้องนับเส้นจากแบบเอง "
-                      "(ยังไม่รองรับ)")
+        notes.append("หลังคา: ไม่พบทั้งตารางสรุปจากผู้ออกแบบและแปลนโครงหลังคาในสารบัญแบบเลย -- ไม่มีทาง"
+                      "ถอดปริมาณหลังคาได้จากไฟล์นี้")
     return notes
 
 
