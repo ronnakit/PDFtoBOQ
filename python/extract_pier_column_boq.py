@@ -237,6 +237,10 @@ def extract_pier_column_takeoff(pdf_path, drawing_no=None):
         if exc_info:
             notes.append(f"หาความลึกฐานรากด้วย text regex ไม่เจอ -- AI vision อ่านเจอที่หน้า "
                          f"{exc_info['page']}: \"{exc_info.get('quote_th')}\"")
+    # หาตารางสเปคฐานรากไว้ล่วงหน้า (ใช้ทั้งความหนา T สำหรับความสูงตอม่อด้านล่าง และขนาดด้านฐานราก
+    # สำหรับความยาวเหล็กพับเข้าฐานรากท้ายฟังก์ชัน) -- ต้องอยู่นอก if exc_info เพราะใช้ทั้งสองที่
+    footing_specs, _spec_pno = extract_footing_boq.find_footing_spec_by_text(doc)
+
     pier_height_m = None
     pier_height_status = "not_computed"
     if exc_info:
@@ -247,7 +251,6 @@ def extract_pier_column_takeoff(pdf_path, drawing_no=None):
         # ชั้นทราย/คอนกรีตหยาบกลับเข้าไป -- และไม่มีหลักฐานว่าระดับพื้นอยู่สูงกว่าระดับดินเดิม (ค่าเผื่อ
         # DEFAULT_FLOOR_LEVEL_M เดิมที่บวกเพิ่มไม่มีข้อมูลรองรับ) จึงตัดออก ใช้ระดับพื้น ≈ ระดับดินเดิม
         # เป็นค่าประมาณแทนถ้าไม่มีข้อมูลจริง (สมเหตุสมผลกว่า เพราะไม่ทราบทิศทาง ไม่ควรเดาว่าสูงกว่าเสมอ)
-        footing_specs, _spec_pno = extract_footing_boq.find_footing_spec_by_text(doc)
         thickness_m = None
         if footing_specs:
             thicknesses = [v["thickness_m"] for v in footing_specs.values() if v.get("thickness_m")]
@@ -274,8 +277,31 @@ def extract_pier_column_takeoff(pdf_path, drawing_no=None):
             f"-- ต้องตรวจสอบกับหน้างานจริงก่อนใช้งานจริง"
         )
 
+    # เหล็กยืนตอม่อ-เสาต้องงอลงไปฝังในฐานรากด้วย ไม่ใช่จบตรงหัวฐานราก -- เจ้าของโปรเจกต์ยืนยันกฎภาคสนาม
+    # 2569-09-03: "เหล็กพับฐานราก ให้ยาวเป็นครึ่งหนึ่งของด้านที่ยาวที่สุดของฐานราก" -- ต้องรู้ว่าตอม่อ
+    # รหัสนี้จับคู่กับฐานรากรหัสไหนบ้าง (pier รหัสเดียวอาจวางบนฐานรากคนละขนาดกันได้หลายจุด เช่น 116-69:
+    # C1 วางทั้งบน F1/F2/F3 ที่ขนาดต่างกัน) แล้วใช้ฐานรากที่ใหญ่สุดที่จับคู่ไว้ (safe-side: ไม่ให้ปริมาณ
+    # เหล็กที่รายงานต่ำกว่าจุดที่ต้องพับยาวที่สุดจริง)
+    footing_codes_by_pier = {}
+    for p in pairs:
+        if p.get("footing_code"):
+            footing_codes_by_pier.setdefault(p["pier_code"], set()).add(p["footing_code"])
+
     items = []
     for code, count in sorted(counts.items()):
+        bend_length_m, bend_length_status = None, "not_computed"
+        paired_footings = footing_codes_by_pier.get(code, set())
+        if footing_specs and paired_footings:
+            longest_sides = [max(footing_specs[fc]["size_m"]) for fc in paired_footings
+                              if footing_specs.get(fc, {}).get("size_m")]
+            if longest_sides:
+                bend_length_m = round(max(longest_sides) / 2, 3)
+                bend_length_status = "computed"
+        if bend_length_m is None:
+            bend_length_m = 0.0
+            bend_length_status = "missing_footing_size"
+            notes.append(f"ไม่มีขนาดฐานรากที่จับคู่กับตอม่อรหัส {code} -- คำนวณความยาวเหล็กพับเข้าฐานรากไม่ได้ (ใช้ 0 ชั่วคราว)")
+
         items.append({
             "code": code,
             "count": count,
@@ -286,6 +312,8 @@ def extract_pier_column_takeoff(pdf_path, drawing_no=None):
             "pier_height_status": pier_height_status,
             "column_height_m": column_height_m,
             "column_height_status": column_height_status,
+            "footing_bend_length_m": bend_length_m,
+            "footing_bend_length_status": bend_length_status,
         })
 
     return {

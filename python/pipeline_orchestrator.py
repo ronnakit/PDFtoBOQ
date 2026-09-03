@@ -108,7 +108,10 @@ def compute_pier_column_summary(pc_result):
                 n_bars = int(item["main_rebar"].split("-")[0])
             except (ValueError, IndexError):
                 pass
-        bar_len_each = length_total  # ไม่รวม hook เข้าฐานราก (ต้องรู้ขนาดฐานรากต่อจุด -- Phase B)
+        # เหล็กยืนต้องงอลงไปฝังในฐานรากด้วย ไม่ใช่จบตรงหัวฐานราก -- ยาว footing_bend_length_m
+        # ที่ extract_pier_column_boq.py คำนวณไว้แล้ว (กฎภาคสนามที่เจ้าของโปรเจกต์ยืนยัน 2569-09-03:
+        # "เหล็กพับฐานราก ให้ยาวเป็นครึ่งหนึ่งของด้านที่ยาวที่สุดของฐานราก")
+        bar_len_each = length_total + item.get("footing_bend_length_m", 0.0)
         total_main_bar_m += n_bars * bar_len_each * item["count"]
 
         spacing = STIRRUP_SPACING_DEFAULT_M
@@ -136,7 +139,9 @@ def compute_pier_column_summary(pc_result):
         "stirrup_count": total_stirrup_count,
         "stirrup_kg_net": round(stirrup_kg, 2),
         "stirrup_kg_with_waste": round(stirrup_kg * (1 + REBAR_WEIGHT_WASTE), 2),
-        "note": "เหล็กยืนยังไม่รวมความยาวฮุคเข้าฐานราก (ต้องรู้ขนาดฐานรากต่อจุด, รอ Phase B)",
+        "note": "เหล็กยืนรวมความยาวพับเข้าฐานรากแล้ว (กฎภาคสนามที่เจ้าของโปรเจกต์ยืนยัน 2569-09-03: "
+                "ยาวครึ่งหนึ่งของด้านที่ยาวที่สุดของฐานรากที่ตอม่อจุดนั้นวางอยู่ -- ดู items[].footing_bend_length_m/"
+                "footing_bend_length_status ต่อรายการ ถ้า status เป็น missing_footing_size แปลว่าจับคู่ฐานรากไม่ได้ ใช้ 0 ชั่วคราว)",
     }
 
 
